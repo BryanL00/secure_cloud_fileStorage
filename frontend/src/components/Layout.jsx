@@ -1,5 +1,7 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import api from '../utils/api';
 
 const SIDEBAR_WIDTH = 240;
 
@@ -34,18 +36,17 @@ const IconShared = () => (
   </svg>
 );
 
-const IconTrash = () => (
+const IconVault = () => (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="3 6 5 6 21 6"/>
-    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
-    <path d="M10 11v6M14 11v6"/>
-    <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    <circle cx="12" cy="16" r="1"/>
   </svg>
 );
 
-const IconCloud = () => (
+const IconShield = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-    <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
   </svg>
 );
 
@@ -79,15 +80,26 @@ const IconInvite = () => (
   </svg>
 );
 
+const IconFile = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2">
+    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+  </svg>
+);
+
+const SENSITIVITY_COLORS = {
+  low:          { bg: '#DCFCE7', text: '#16A34A' },
+  medium:       { bg: '#FEF3C7', text: '#D97706' },
+  high:         { bg: '#FEE2E2', text: '#DC2626' },
+  confidential: { bg: '#EDE9FE', text: '#7C3AED' },
+};
+
 const NavItem = ({ label, icon, isActive, onClick }) => (
   <div
     onClick={onClick}
     style={{
-      padding: '10px 12px',
-      borderRadius: '8px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '10px',
+      padding: '10px 12px', borderRadius: '8px',
+      display: 'flex', alignItems: 'center', gap: '10px',
       color: isActive ? '#16A34A' : '#64748B',
       background: isActive ? '#F0FDF4' : 'transparent',
       fontWeight: isActive ? '600' : '400',
@@ -104,31 +116,83 @@ const NavItem = ({ label, icon, isActive, onClick }) => (
   </div>
 );
 
+const fmt = (bytes) => {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1048576).toFixed(1)} MB`;
+};
+
 const Layout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const searchRef = useRef(null);
+  const debounceRef = useRef(null);
+
+  const handleLogout = () => { logout(); navigate('/login'); };
 
   const initials = user?.full_name?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U';
 
+  const performSearch = useCallback(async (q) => {
+    if (!q.trim() || user?.role === 'Administrator') {
+      setSearchResults([]); setShowDropdown(false); return;
+    }
+    setSearchLoading(true);
+    try {
+      const res = await api.get(`/files/search?q=${encodeURIComponent(q)}`);
+      setSearchResults(res.data.files || []);
+      setShowDropdown(true);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [user]);
+
+  const handleSearchChange = (e) => {
+    const val = e.target.value;
+    setSearchQuery(val);
+    clearTimeout(debounceRef.current);
+    if (!val.trim()) { setSearchResults([]); setShowDropdown(false); return; }
+    debounceRef.current = setTimeout(() => performSearch(val), 300);
+  };
+
+  const handleDownload = async (fileId, fileName) => {
+    try {
+      const res = await api.get(`/files/download/${fileId}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = url; link.setAttribute('download', fileName);
+      document.body.appendChild(link); link.click(); link.remove();
+      setShowDropdown(false); setSearchQuery('');
+    } catch { /* silent */ }
+  };
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (searchRef.current && !searchRef.current.contains(e.target)) setShowDropdown(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   const mainNavItems = [
     { to: '/dashboard', label: 'Dashboard', icon: <IconDashboard /> },
-    ...(user?.role !== 'Administrator' ? [
-      { to: '/my-files', label: 'Files', icon: <IconFiles /> },
-    ] : []),
-    ...(user?.role === 'Administrator' ? [
-      { to: '/admin', label: 'Admin Panel', icon: <IconAdmin /> },
-    ] : []),
+    ...(user?.role !== 'Administrator' ? [{ to: '/my-files', label: 'Files', icon: <IconFiles /> }] : []),
+    ...(user?.role === 'Administrator' ? [{ to: '/admin', label: 'Admin Panel', icon: <IconAdmin /> }] : []),
   ];
 
   const extraNavItems = user?.role !== 'Administrator' ? [
-    { label: 'Shared', icon: <IconShared /> },
-    { label: 'Deleted Files', icon: <IconTrash /> },
-  ] : [];
+    { label: 'Shared Files', icon: <IconShared />, to: '/shared-files' },
+    { label: 'Vault', icon: <IconVault />, to: '/vault' },
+  ] : [
+    { label: 'Vault', icon: <IconVault />, to: '/vault' },
+  ];
 
   const quickAccessItems = ['Starred', 'Finance', 'Report', 'Event'];
 
@@ -137,30 +201,23 @@ const Layout = () => {
 
       {/* ── Sidebar ── */}
       <aside style={{
-        width: `${SIDEBAR_WIDTH}px`,
-        flexShrink: 0,
-        background: '#FFFFFF',
-        borderRight: '1px solid #E2E8F0',
-        display: 'flex',
-        flexDirection: 'column',
-        position: 'fixed',
-        top: 0, left: 0,
-        height: '100vh',
-        zIndex: 100,
+        width: `${SIDEBAR_WIDTH}px`, flexShrink: 0,
+        background: '#FFFFFF', borderRight: '1px solid #E2E8F0',
+        display: 'flex', flexDirection: 'column',
+        position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 100,
       }}>
-
         {/* Logo */}
         <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid #F1F5F9' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{
               width: '36px', height: '36px', borderRadius: '10px',
-              background: '#22C55E', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0,
+              background: '#22C55E', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', flexShrink: 0,
             }}>
-              <IconCloud />
+              <IconShield />
             </div>
-            <span style={{ fontSize: '18px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.3px' }}>
-              Cloudy
+            <span style={{ fontSize: '16px', fontWeight: '800', color: '#0F172A', letterSpacing: '-0.5px' }}>
+              CloudFortify
             </span>
           </div>
         </div>
@@ -169,37 +226,24 @@ const Layout = () => {
         <div style={{ padding: '12px', flex: 1, overflowY: 'auto' }}>
           {mainNavItems.map(item => (
             <NavLink key={item.to} to={item.to} style={{ textDecoration: 'none' }}>
-              {({ isActive }) => (
-                <NavItem label={item.label} icon={item.icon} isActive={isActive} onClick={undefined} />
-              )}
+              {({ isActive }) => <NavItem label={item.label} icon={item.icon} isActive={isActive} onClick={undefined} />}
             </NavLink>
           ))}
-
           {extraNavItems.map(item => (
-            <NavItem key={item.label} label={item.label} icon={item.icon} isActive={false} onClick={() => {}} />
+            <NavLink key={item.to} to={item.to} style={{ textDecoration: 'none' }}>
+              {({ isActive }) => <NavItem label={item.label} icon={item.icon} isActive={isActive} onClick={undefined} />}
+            </NavLink>
           ))}
 
           {/* Quick Access */}
           {user?.role !== 'Administrator' && (
             <div style={{ marginTop: '20px' }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '0 12px 8px',
-              }}>
-                <span style={{
-                  fontSize: '11px', fontWeight: '600', color: '#94A3B8',
-                  textTransform: 'uppercase', letterSpacing: '0.06em',
-                }}>
-                  Quick Access
-                </span>
-                <span style={{ color: '#94A3B8', fontSize: '18px', lineHeight: 1, cursor: 'pointer', userSelect: 'none' }}>+</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px 8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Quick Access</span>
+                <span style={{ color: '#94A3B8', fontSize: '18px', lineHeight: 1, cursor: 'pointer' }}>+</span>
               </div>
               {quickAccessItems.map(label => (
-                <div key={label} style={{
-                  padding: '9px 12px', borderRadius: '8px',
-                  display: 'flex', alignItems: 'center', gap: '10px',
-                  color: '#64748B', fontSize: '14px', cursor: 'pointer',
-                }}>
+                <div key={label} style={{ padding: '9px 12px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px', color: '#64748B', fontSize: '14px', cursor: 'pointer' }}>
                   <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#CBD5E1', flexShrink: 0 }} />
                   {label}
                 </div>
@@ -212,7 +256,7 @@ const Layout = () => {
         <div style={{ padding: '16px', borderTop: '1px solid #F1F5F9' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2">
-              <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
             </svg>
             <span style={{ fontSize: '13px', fontWeight: '600', color: '#334155' }}>Storage</span>
           </div>
@@ -220,24 +264,17 @@ const Layout = () => {
             <div style={{ width: '56%', height: '100%', background: 'linear-gradient(90deg, #22C55E, #16A34A)', borderRadius: '99px' }} />
           </div>
           <div style={{ fontSize: '11px', color: '#94A3B8', marginBottom: '12px' }}>500 GB of 900 GB used</div>
-          <button
-            onClick={handleLogout}
-            style={{
-              width: '100%', padding: '10px', background: '#0F172A', color: '#FFFFFF',
-              border: 'none', borderRadius: '8px', cursor: 'pointer',
-              fontSize: '13px', fontWeight: '600', letterSpacing: '0.01em',
-            }}
-          >
+          <button onClick={handleLogout} style={{
+            width: '100%', padding: '10px', background: '#0F172A', color: '#FFFFFF',
+            border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600',
+          }}>
             Sign Out
           </button>
         </div>
 
         {/* Notification & Help */}
         <div style={{ padding: '8px 12px 20px', borderTop: '1px solid #F1F5F9', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          {[
-            { label: 'Notification', icon: <IconBell /> },
-            { label: 'Help and Guide', icon: <IconHelp /> },
-          ].map(item => (
+          {[{ label: 'Notification', icon: <IconBell /> }, { label: 'Help and Guide', icon: <IconHelp /> }].map(item => (
             <NavItem key={item.label} label={item.label} icon={item.icon} isActive={false} onClick={() => {}} />
           ))}
         </div>
@@ -248,55 +285,107 @@ const Layout = () => {
 
         {/* Top header */}
         <header style={{
-          height: '64px',
-          background: '#FFFFFF',
-          borderBottom: '1px solid #E2E8F0',
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 32px',
-          gap: '16px',
-          position: 'sticky',
-          top: 0,
-          zIndex: 99,
+          height: '64px', background: '#FFFFFF', borderBottom: '1px solid #E2E8F0',
+          display: 'flex', alignItems: 'center', padding: '0 32px', gap: '16px',
+          position: 'sticky', top: 0, zIndex: 99,
         }}>
           {/* Search */}
-          <div style={{ flex: 1, maxWidth: '440px' }}>
+          <div style={{ flex: 1, maxWidth: '440px', position: 'relative' }} ref={searchRef}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: '10px',
               background: '#F8FAFC', border: '1.5px solid #E2E8F0',
               borderRadius: '10px', padding: '9px 14px',
+              borderColor: showDropdown ? '#22C55E' : '#E2E8F0',
+              transition: 'border-color 0.15s',
             }}>
               <IconSearch />
               <input
                 type="text"
-                placeholder="Search"
+                placeholder={user?.role === 'Administrator' ? 'Search unavailable for admins' : 'Search files by name, tag, department…'}
+                value={searchQuery}
+                onChange={handleSearchChange}
+                disabled={user?.role === 'Administrator'}
                 style={{
                   background: 'none', border: 'none', outline: 'none',
                   flex: 1, fontSize: '14px', color: '#0F172A', fontFamily: 'inherit',
+                  cursor: user?.role === 'Administrator' ? 'not-allowed' : 'text',
                 }}
               />
+              {searchLoading && (
+                <div style={{ width: '14px', height: '14px', border: '2px solid #E2E8F0', borderTopColor: '#22C55E', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
+              )}
             </div>
+
+            {/* Search results dropdown */}
+            {showDropdown && (
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
+                background: '#FFFFFF', borderRadius: '12px',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.12)', border: '1px solid #E2E8F0',
+                zIndex: 200, overflow: 'hidden', maxHeight: '360px', overflowY: 'auto',
+              }}>
+                {searchResults.length === 0 ? (
+                  <div style={{ padding: '20px', textAlign: 'center', fontSize: '13px', color: '#94A3B8' }}>
+                    No files match &ldquo;{searchQuery}&rdquo;
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ padding: '10px 16px 6px', fontSize: '11px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      {searchResults.length} result{searchResults.length !== 1 ? 's' : ''}
+                    </div>
+                    {searchResults.map(file => {
+                      const sc = SENSITIVITY_COLORS[file.sensitivity_level] || SENSITIVITY_COLORS.low;
+                      return (
+                        <div key={file.id} style={{
+                          display: 'flex', alignItems: 'center', gap: '12px',
+                          padding: '10px 16px', borderTop: '1px solid #F8FAFC', transition: 'background 0.1s',
+                        }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        >
+                          <div style={{ width: '30px', height: '30px', borderRadius: '8px', background: '#F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <IconFile />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '13px', fontWeight: '500', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {file.original_name}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                              <span style={{ fontSize: '10px', fontWeight: '600', padding: '1px 7px', borderRadius: '20px', background: sc.bg, color: sc.text }}>
+                                {file.sensitivity_level}
+                              </span>
+                              {file.department && <span style={{ fontSize: '11px', color: '#94A3B8' }}>{file.department}</span>}
+                              <span style={{ fontSize: '11px', color: '#94A3B8' }}>{fmt(file.size_bytes)}</span>
+                            </div>
+                          </div>
+                          <button onClick={() => handleDownload(file.id, file.original_name)} style={{
+                            padding: '5px 12px', background: '#22C55E', color: '#fff',
+                            border: 'none', borderRadius: '6px', fontSize: '11px',
+                            fontWeight: '600', cursor: 'pointer', flexShrink: 0,
+                          }}>
+                            Download
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px' }}>
-            {/* Invite Members */}
             <button style={{
-              display: 'flex', alignItems: 'center', gap: '6px',
-              padding: '8px 14px', background: 'none',
-              border: '1.5px solid #E2E8F0', borderRadius: '8px',
+              display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
+              background: 'none', border: '1.5px solid #E2E8F0', borderRadius: '8px',
               color: '#475569', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
-              transition: 'border-color 0.15s',
             }}>
               <IconInvite />
               Invite Members
             </button>
-
-            {/* User profile */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '13px', fontWeight: '600', color: '#0F172A', whiteSpace: 'nowrap' }}>
-                  {user?.full_name}
-                </div>
+                <div style={{ fontSize: '13px', fontWeight: '600', color: '#0F172A', whiteSpace: 'nowrap' }}>{user?.full_name}</div>
                 <div style={{ fontSize: '11px', color: '#64748B' }}>{user?.role}</div>
               </div>
               <div style={{
@@ -311,11 +400,12 @@ const Layout = () => {
           </div>
         </header>
 
-        {/* Page content */}
         <main style={{ flex: 1, padding: '32px' }}>
           <Outlet />
         </main>
       </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };

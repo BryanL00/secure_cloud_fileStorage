@@ -44,13 +44,8 @@ body {
   transition: background 0.15s ease;
 }
 
-.neu-btn:hover {
-  background: #E2E8F0;
-}
-
-.neu-btn:active {
-  background: #CBD5E1;
-}
+.neu-btn:hover { background: #E2E8F0; }
+.neu-btn:active { background: #CBD5E1; }
 
 .neu-btn-primary {
   background: #22C55E;
@@ -64,13 +59,8 @@ body {
   transition: background 0.15s ease;
 }
 
-.neu-btn-primary:hover {
-  background: #16A34A;
-}
-
-.neu-btn-primary:active {
-  background: #15803D;
-}
+.neu-btn-primary:hover { background: #16A34A; }
+.neu-btn-primary:active { background: #15803D; }
 
 .neu-btn-primary:disabled,
 .neu-btn:disabled {
@@ -97,9 +87,7 @@ body {
   background: #FFFFFF;
 }
 
-.neu-input::placeholder {
-  color: #94A3B8;
-}
+.neu-input::placeholder { color: #94A3B8; }
 
 select.neu-input {
   cursor: pointer;

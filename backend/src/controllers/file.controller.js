@@ -41,6 +41,13 @@ const upload = async (req, res) => {
     const encryptedBuffer = encryptFile(fileBuffer, aesKey, iv);
     const encryptedAESKey = encryptAESKey(aesKey);
 
+    await log(
+      req.user.id, req.user.email, req.user.role,
+      ACTIONS.FILE_ENCRYPT, 'files', fileId,
+      `Encrypted: ${req.file.originalname} | AES-256-CBC | RSA-wrapped key | size: ${req.file.size} bytes`,
+      req.ip
+    );
+
     await uploadFile(storageKey, encryptedBuffer);
 
     await pool.query(
@@ -64,7 +71,7 @@ const upload = async (req, res) => {
     await log(
       req.user.id, req.user.email, req.user.role,
       ACTIONS.FILE_UPLOAD, 'files', fileId,
-      `Uploaded file: ${req.file.originalname} | sensitivity: ${sensitivity_level} | dept: ${department}`,
+      `Uploaded: ${req.file.originalname} | sensitivity: ${sensitivity_level} | dept: ${department}`,
       req.ip
     );
 
@@ -104,7 +111,6 @@ const download = async (req, res) => {
 
     const file = fileResult.rows[0];
 
-    // Admin cannot download files
     if (req.user.role === 'Administrator') {
       await log(
         req.user.id, req.user.email, req.user.role,
@@ -117,12 +123,9 @@ const download = async (req, res) => {
       });
     }
 
-    // Check ownership or permission
     const isOwner = file.owner_id === req.user.id;
-    const isManager = req.user.role === 'Manager';
 
     if (!isOwner) {
-      // Check shared permissions
       const permResult = await pool.query(
         `SELECT id FROM file_permissions
          WHERE file_id = $1 AND granted_to_user_id = $2`,
@@ -140,7 +143,6 @@ const download = async (req, res) => {
       }
     }
 
-    // Guest can only access low sensitivity files
     if (req.user.role === 'Guest' && file.sensitivity_level !== 'low') {
       await log(
         req.user.id, req.user.email, req.user.role,
@@ -152,6 +154,13 @@ const download = async (req, res) => {
         message: 'Access denied: file sensitivity level too high'
       });
     }
+
+    await log(
+      req.user.id, req.user.email, req.user.role,
+      ACTIONS.ACCESS_EVAL, 'files', id,
+      `Access evaluation passed: role=${req.user.role}, sensitivity=${file.sensitivity_level}, owner=${isOwner}`,
+      req.ip
+    );
 
     const keyResult = await pool.query(
       `SELECT encrypted_aes_key, aes_iv FROM file_encryption_keys WHERE file_id = $1`,
@@ -170,8 +179,15 @@ const download = async (req, res) => {
 
     await log(
       req.user.id, req.user.email, req.user.role,
+      ACTIONS.FILE_DECRYPT, 'files', id,
+      `Decrypted: ${file.original_name} | RSA key-unwrap + AES-256-CBC`,
+      req.ip
+    );
+
+    await log(
+      req.user.id, req.user.email, req.user.role,
       ACTIONS.FILE_DOWNLOAD, 'files', id,
-      `Downloaded file: ${file.original_name}`,
+      `Downloaded: ${file.original_name}`,
       req.ip
     );
 
@@ -186,58 +202,213 @@ const download = async (req, res) => {
 
 const listFiles = async (req, res) => {
   try {
-    // Admin cannot see any files
     if (req.user.role === 'Administrator') {
       return res.status(403).json({
         message: 'Administrators do not have access to file contents or listings'
       });
     }
 
-    let result;
-
-    if (req.user.role === 'Manager') {
-      result = await pool.query(
-        `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
-                f.sensitivity_level, f.project_category, f.department,
-                f.folder_id, f.uploaded_at, u.email as owner_email
-         FROM files f
-         JOIN users u ON f.owner_id = u.id
-         WHERE f.is_deleted = FALSE
+    const result = await pool.query(
+      `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
+              f.sensitivity_level, f.project_category, f.department,
+              f.folder_id, f.uploaded_at, u.email as owner_email
+       FROM files f
+       JOIN users u ON f.owner_id = u.id
+       WHERE f.is_deleted = FALSE
          AND (
            f.owner_id = $1
-           OR f.id IN (
-             SELECT file_id FROM file_permissions WHERE granted_to_user_id = $1
-           )
+           OR f.id IN (SELECT file_id FROM file_permissions WHERE granted_to_user_id = $1)
          )
-         ORDER BY f.uploaded_at DESC`,
-        [req.user.id]
-      );
-    } else {
-      result = await pool.query(
-        `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
-                f.sensitivity_level, f.project_category, f.department,
-                f.folder_id, f.uploaded_at, u.email as owner_email
-         FROM files f
-         JOIN users u ON f.owner_id = u.id
-         WHERE f.is_deleted = FALSE
-         AND (
-           f.owner_id = $1
-           OR f.id IN (
-             SELECT file_id FROM file_permissions WHERE granted_to_user_id = $1
-           )
-         )
-         ORDER BY f.uploaded_at DESC`,
-        [req.user.id]
-      );
-    }
+       ORDER BY f.uploaded_at DESC`,
+      [req.user.id]
+    );
 
     res.json({ files: result.rows });
 
   } catch (error) {
-    res.status(500).json({
-      message: 'Failed to fetch files',
-      error: error.message
-    });
+    res.status(500).json({ message: 'Failed to fetch files', error: error.message });
+  }
+};
+
+const listSharedFiles = async (req, res) => {
+  try {
+    if (req.user.role === 'Administrator') {
+      return res.status(403).json({ message: 'Administrators cannot access files' });
+    }
+
+    const result = await pool.query(
+      `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
+              f.sensitivity_level, f.project_category, f.department,
+              f.folder_id, f.uploaded_at, u.email as owner_email,
+              fp.permission_level, gb.email as shared_by_email
+       FROM files f
+       JOIN users u ON f.owner_id = u.id
+       JOIN file_permissions fp ON fp.file_id = f.id
+       JOIN users gb ON fp.granted_by_user_id = gb.id
+       WHERE fp.granted_to_user_id = $1
+         AND f.is_deleted = FALSE
+       ORDER BY f.uploaded_at DESC`,
+      [req.user.id]
+    );
+
+    await log(
+      req.user.id, req.user.email, req.user.role,
+      ACTIONS.ACCESS_EVAL, 'files', null,
+      `Listed shared files — ${result.rows.length} files accessible`,
+      req.ip
+    );
+
+    res.json({ files: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch shared files', error: error.message });
+  }
+};
+
+const listDeletedFiles = async (req, res) => {
+  try {
+    let result;
+
+    if (req.user.role === 'Administrator') {
+      result = await pool.query(
+        `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
+                f.sensitivity_level, f.project_category, f.department,
+                f.uploaded_at, u.email as owner_email, u.id as owner_id
+         FROM files f
+         JOIN users u ON f.owner_id = u.id
+         WHERE f.is_deleted = TRUE
+         ORDER BY f.uploaded_at DESC`
+      );
+    } else if (['Manager', 'User'].includes(req.user.role)) {
+      result = await pool.query(
+        `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
+                f.sensitivity_level, f.project_category, f.department,
+                f.uploaded_at, u.email as owner_email, u.id as owner_id
+         FROM files f
+         JOIN users u ON f.owner_id = u.id
+         WHERE f.is_deleted = TRUE AND f.owner_id = $1
+         ORDER BY f.uploaded_at DESC`,
+        [req.user.id]
+      );
+    } else {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    res.json({ files: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch vault files', error: error.message });
+  }
+};
+
+const restoreFile = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const fileResult = await pool.query(
+      'SELECT * FROM files WHERE id = $1 AND is_deleted = TRUE', [id]
+    );
+
+    if (fileResult.rows.length === 0) {
+      return res.status(404).json({ message: 'File not found in vault' });
+    }
+
+    const file = fileResult.rows[0];
+
+    if (req.user.role !== 'Administrator' && file.owner_id !== req.user.id) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    await pool.query('UPDATE files SET is_deleted = FALSE WHERE id = $1', [id]);
+
+    await log(
+      req.user.id, req.user.email, req.user.role,
+      ACTIONS.FILE_RESTORE, 'files', id,
+      `Restored file from vault: ${file.original_name}`,
+      req.ip
+    );
+
+    res.json({ message: 'File restored successfully' });
+  } catch (error) {
+    res.status(500).json({ message: 'Restore failed', error: error.message });
+  }
+};
+
+const permanentDelete = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const fileResult = await pool.query(
+      'SELECT * FROM files WHERE id = $1 AND is_deleted = TRUE', [id]
+    );
+
+    if (fileResult.rows.length === 0) {
+      return res.status(404).json({ message: 'File not found in vault' });
+    }
+
+    const file = fileResult.rows[0];
+
+    await pool.query('DELETE FROM file_encryption_keys WHERE file_id = $1', [id]);
+    await pool.query('DELETE FROM file_permissions WHERE file_id = $1', [id]);
+    await pool.query('DELETE FROM files WHERE id = $1', [id]);
+
+    try {
+      await deleteFile(file.storage_key);
+    } catch (e) {
+      console.error('MinIO delete (non-fatal):', e.message);
+    }
+
+    await log(
+      req.user.id, req.user.email, req.user.role,
+      ACTIONS.FILE_PERMANENT_DELETE, 'files', id,
+      `Permanently erased from vault: ${file.original_name}`,
+      req.ip
+    );
+
+    res.json({ message: 'File permanently deleted' });
+  } catch (error) {
+    res.status(500).json({ message: 'Permanent delete failed', error: error.message });
+  }
+};
+
+const searchFiles = async (req, res) => {
+  try {
+    if (req.user.role === 'Administrator') {
+      return res.status(403).json({ message: 'Administrators cannot search files' });
+    }
+
+    const { q = '' } = req.query;
+
+    if (!q.trim()) {
+      return res.json({ files: [] });
+    }
+
+    const searchTerm = `%${q.trim().toLowerCase()}%`;
+
+    const result = await pool.query(
+      `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
+              f.sensitivity_level, f.project_category, f.department,
+              f.folder_id, f.uploaded_at, u.email as owner_email
+       FROM files f
+       JOIN users u ON f.owner_id = u.id
+       WHERE f.is_deleted = FALSE
+         AND (
+           f.owner_id = $1
+           OR f.id IN (SELECT file_id FROM file_permissions WHERE granted_to_user_id = $1)
+         )
+         AND (
+           LOWER(f.original_name) LIKE $2
+           OR LOWER(COALESCE(f.project_category, '')) LIKE $2
+           OR LOWER(COALESCE(f.department, '')) LIKE $2
+           OR LOWER(f.sensitivity_level) LIKE $2
+           OR LOWER(u.email) LIKE $2
+         )
+       ORDER BY f.uploaded_at DESC
+       LIMIT 20`,
+      [req.user.id, searchTerm]
+    );
+
+    res.json({ files: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: 'Search failed', error: error.message });
   }
 };
 
@@ -245,11 +416,8 @@ const deleteFileRecord = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Admin cannot delete files
     if (req.user.role === 'Administrator') {
-      return res.status(403).json({
-        message: 'Administrators cannot delete files'
-      });
+      return res.status(403).json({ message: 'Administrators cannot delete files' });
     }
 
     const fileResult = await pool.query(
@@ -262,7 +430,6 @@ const deleteFileRecord = async (req, res) => {
 
     const file = fileResult.rows[0];
 
-    // Only owner can delete
     if (file.owner_id !== req.user.id) {
       return res.status(403).json({ message: 'Access denied' });
     }
@@ -272,11 +439,11 @@ const deleteFileRecord = async (req, res) => {
     await log(
       req.user.id, req.user.email, req.user.role,
       ACTIONS.FILE_DELETE, 'files', id,
-      `Deleted file: ${file.original_name}`,
+      `Soft-deleted (moved to vault): ${file.original_name}`,
       req.ip
     );
 
-    res.json({ message: 'File deleted successfully' });
+    res.json({ message: 'File moved to vault' });
 
   } catch (error) {
     res.status(500).json({ message: 'Delete failed', error: error.message });
@@ -288,11 +455,8 @@ const shareFile = async (req, res) => {
     const { id } = req.params;
     const { granted_to_email, permission_level = 'viewer' } = req.body;
 
-    // Only Manager can share
     if (req.user.role !== 'Manager') {
-      return res.status(403).json({
-        message: 'Only Managers can share files'
-      });
+      return res.status(403).json({ message: 'Only Managers can share files' });
     }
 
     const fileResult = await pool.query(
@@ -305,14 +469,10 @@ const shareFile = async (req, res) => {
 
     const file = fileResult.rows[0];
 
-    // Manager can only share files they own
     if (file.owner_id !== req.user.id) {
-      return res.status(403).json({
-        message: 'You can only share files you own'
-      });
+      return res.status(403).json({ message: 'You can only share files you own' });
     }
 
-    // Find the user to share with
     const userResult = await pool.query(
       `SELECT u.id, u.email, u.department, r.name as role
        FROM users u
@@ -327,23 +487,18 @@ const shareFile = async (req, res) => {
 
     const targetUser = userResult.rows[0];
 
-    // Can only share to User or Guest roles
     if (!['User', 'Guest'].includes(targetUser.role)) {
       return res.status(403).json({
         message: 'Files can only be shared with User or Guest roles'
       });
     }
 
-    // Check department or project category match
     const managerResult = await pool.query(
-      'SELECT department FROM users WHERE id = $1',
-      [req.user.id]
+      'SELECT department FROM users WHERE id = $1', [req.user.id]
     );
     const managerDept = managerResult.rows[0]?.department;
-
     const sameDepartment = managerDept && targetUser.department === managerDept;
-    const sameProject = file.project_category &&
-      file.project_category.trim() !== '';
+    const sameProject = file.project_category && file.project_category.trim() !== '';
 
     if (!sameDepartment && !sameProject) {
       return res.status(403).json({
@@ -363,7 +518,7 @@ const shareFile = async (req, res) => {
     await log(
       req.user.id, req.user.email, req.user.role,
       ACTIONS.FILE_SHARE, 'files', id,
-      `Shared file: ${file.original_name} with ${granted_to_email}`,
+      `Shared: ${file.original_name} → ${granted_to_email} | dept: ${managerDept}`,
       req.ip
     );
 
@@ -374,4 +529,8 @@ const shareFile = async (req, res) => {
   }
 };
 
-module.exports = { upload, download, listFiles, deleteFileRecord, shareFile };
+module.exports = {
+  upload, download, listFiles, listSharedFiles,
+  listDeletedFiles, restoreFile, permanentDelete,
+  searchFiles, deleteFileRecord, shareFile
+};

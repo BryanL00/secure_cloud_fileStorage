@@ -11,24 +11,24 @@ const ROLE_COLORS = {
 };
 
 const ACTION_COLORS = {
-  LOGIN:             '#16A34A',
-  FILE_UPLOAD:       '#2563EB',
-  FILE_DOWNLOAD:     '#D97706',
-  FILE_DELETE:       '#DC2626',
-  FILE_SHARE:        '#2563EB',
-  ACCESS_DENIED:     '#DC2626',
-  USER_ROLE_UPDATE:  '#D97706',
-  USER_DEACTIVATE:   '#DC2626',
+  LOGIN:            '#16A34A',
+  FILE_UPLOAD:      '#2563EB',
+  FILE_DOWNLOAD:    '#D97706',
+  FILE_DELETE:      '#DC2626',
+  FILE_SHARE:       '#2563EB',
+  ACCESS_DENIED:    '#DC2626',
+  USER_ROLE_UPDATE: '#D97706',
+  USER_DEACTIVATE:  '#DC2626',
 };
 
 const AdminPanel = () => {
-  const [users, setUsers]         = useState([]);
-  const [logs, setLogs]           = useState([]);
-  const [loading, setLoading]     = useState(true);
+  const [users, setUsers]             = useState([]);
+  const [logs, setLogs]               = useState([]);
+  const [loading, setLoading]         = useState(true);
   const [logsLoading, setLogsLoading] = useState(true);
-  const [error, setError]         = useState('');
-  const [success, setSuccess]     = useState('');
-  const [activeTab, setActiveTab] = useState('users');
+  const [error, setError]             = useState('');
+  const [success, setSuccess]         = useState('');
+  const [activeTab, setActiveTab]     = useState('users');
 
   const fetchUsers = async () => {
     try { const res = await api.get('/users'); setUsers(res.data.users); }
@@ -64,9 +64,7 @@ const AdminPanel = () => {
     <div>
       <div style={{ marginBottom: '24px' }}>
         <div style={{ fontSize: '20px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.3px' }}>Admin Panel</div>
-        <div style={{ fontSize: '13px', color: '#64748B', marginTop: '3px' }}>
-          Manage users, roles, departments and audit logs
-        </div>
+        <div style={{ fontSize: '13px', color: '#64748B', marginTop: '3px' }}>Manage users, roles, departments and audit logs</div>
       </div>
 
       {error   && <div className="error-box">{error}</div>}
@@ -74,7 +72,7 @@ const AdminPanel = () => {
 
       {/* Role summary cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
-        {['Administrator', 'Manager', 'User', 'Guest'].map(role => {
+        {['Administrator','Manager','User','Guest'].map(role => {
           const { bg, text } = ROLE_COLORS[role];
           return (
             <div key={role} className="neu-raised" style={{ padding: '20px' }}>
@@ -85,9 +83,7 @@ const AdminPanel = () => {
                     <circle cx="9" cy="7" r="4"/>
                   </svg>
                 </div>
-                <span style={{ fontSize: '11px', fontWeight: '600', padding: '3px 10px', borderRadius: '20px', background: bg, color: text }}>
-                  {role}
-                </span>
+                <span style={{ fontSize: '11px', fontWeight: '600', padding: '3px 10px', borderRadius: '20px', background: bg, color: text }}>{role}</span>
               </div>
               <div style={{ fontSize: '26px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.5px' }}>
                 {users.filter(u => u.role === role).length}
@@ -100,11 +96,8 @@ const AdminPanel = () => {
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '6px', marginBottom: '16px' }}>
-        {['users', 'logs'].map(tab => (
-          <button key={tab}
-            className={activeTab === tab ? 'neu-btn-primary' : 'neu-btn'}
-            onClick={() => setActiveTab(tab)}
-            style={{ fontSize: '13px', padding: '9px 20px' }}>
+        {['users','logs'].map(tab => (
+          <button key={tab} className={activeTab === tab ? 'neu-btn-primary' : 'neu-btn'} onClick={() => setActiveTab(tab)} style={{ fontSize: '13px', padding: '9px 20px' }}>
             {tab === 'users' ? 'User Management' : 'Audit Logs'}
           </button>
         ))}
@@ -125,38 +118,23 @@ const AdminPanel = () => {
                   <div key={h} style={{ fontSize: '11px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</div>
                 ))}
               </div>
-
               {users.map((user, idx) => (
-                <div key={user.id} style={{
-                  display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 1fr 1fr 1fr 1fr',
-                  gap: '8px', padding: '14px 20px', alignItems: 'center',
-                  borderBottom: idx < users.length - 1 ? '1px solid #F8FAFC' : 'none',
-                }}>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: '600', color: '#0F172A' }}>{user.full_name}</div>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {user.email}
-                  </div>
-                  <select className="neu-input" style={{ padding: '7px 10px', fontSize: '12px' }}
-                    value={user.role} onChange={e => handleRoleChange(user.id, e.target.value)}>
+                <div key={user.id} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 1fr 1fr 1fr 1fr', gap: '8px', padding: '14px 20px', alignItems: 'center', borderBottom: idx < users.length - 1 ? '1px solid #F8FAFC' : 'none' }}>
+                  <div style={{ fontSize: '13px', fontWeight: '600', color: '#0F172A' }}>{user.full_name}</div>
+                  <div style={{ fontSize: '12px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</div>
+                  <select className="neu-input" style={{ padding: '7px 10px', fontSize: '12px' }} value={user.role} onChange={e => handleRoleChange(user.id, e.target.value)}>
                     {['Administrator','Manager','User','Guest'].map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
-                  <select className="neu-input" style={{ padding: '7px 10px', fontSize: '12px' }}
-                    value={user.department || ''} onChange={e => handleDepartmentChange(user.id, e.target.value)}>
+                  <select className="neu-input" style={{ padding: '7px 10px', fontSize: '12px' }} value={user.department || ''} onChange={e => handleDepartmentChange(user.id, e.target.value)}>
                     <option value="">No dept</option>
                     {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
-                  <span className="badge" style={{
-                    background: user.is_active ? '#DCFCE7' : '#FEE2E2',
-                    color: user.is_active ? '#16A34A' : '#DC2626',
-                  }}>
+                  <span className="badge" style={{ background: user.is_active ? '#DCFCE7' : '#FEE2E2', color: user.is_active ? '#16A34A' : '#DC2626' }}>
                     {user.is_active ? 'Active' : 'Inactive'}
                   </span>
                   <div>
                     {user.is_active && (
-                      <button className="neu-btn" style={{ padding: '6px 10px', fontSize: '11px', color: '#DC2626' }}
-                        onClick={() => handleDeactivate(user.id)}>
+                      <button className="neu-btn" style={{ padding: '6px 10px', fontSize: '11px', color: '#DC2626' }} onClick={() => handleDeactivate(user.id)}>
                         Deactivate
                       </button>
                     )}
@@ -173,11 +151,8 @@ const AdminPanel = () => {
         <div className="neu-raised" style={{ padding: '0', overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #F1F5F9' }}>
             <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A' }}>Audit Logs</div>
-            <button className="neu-btn" style={{ fontSize: '12px' }} onClick={fetchLogs}>
-              Refresh
-            </button>
+            <button className="neu-btn" style={{ fontSize: '12px' }} onClick={fetchLogs}>Refresh</button>
           </div>
-
           {logsLoading ? (
             <div style={{ padding: '48px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>Loading logs…</div>
           ) : logs.length === 0 ? (
@@ -192,26 +167,12 @@ const AdminPanel = () => {
               {logs.map((log, idx) => {
                 const color = ACTION_COLORS[log.action] || '#64748B';
                 return (
-                  <div key={log.id} style={{
-                    display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 2fr 1fr',
-                    gap: '8px', padding: '13px 20px', alignItems: 'center',
-                    borderBottom: idx < logs.length - 1 ? '1px solid #F8FAFC' : 'none',
-                  }}>
-                    <div style={{ fontSize: '12px', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {log.user_email || 'System'}
-                    </div>
+                  <div key={log.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 2fr 1fr', gap: '8px', padding: '13px 20px', alignItems: 'center', borderBottom: idx < logs.length - 1 ? '1px solid #F8FAFC' : 'none' }}>
+                    <div style={{ fontSize: '12px', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.user_email || 'System'}</div>
                     <div style={{ fontSize: '11px', color: '#64748B' }}>{log.user_role || '—'}</div>
-                    <div>
-                      <span className="badge" style={{ background: `${color}15`, color, fontSize: '10px' }}>
-                        {log.action}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {log.details || '—'}
-                    </div>
-                    <div style={{ fontSize: '11px', color: '#94A3B8' }}>
-                      {new Date(log.created_at).toLocaleString()}
-                    </div>
+                    <div><span className="badge" style={{ background: `${color}15`, color, fontSize: '10px' }}>{log.action}</span></div>
+                    <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.details || '—'}</div>
+                    <div style={{ fontSize: '11px', color: '#94A3B8' }}>{new Date(log.created_at).toLocaleString()}</div>
                   </div>
                 );
               })}
