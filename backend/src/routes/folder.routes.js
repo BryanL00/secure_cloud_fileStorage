@@ -3,11 +3,13 @@ const router = express.Router();
 const pool = require('../utils/db');
 const { authenticate, authorize } = require('../middleware/auth');
 
+const MANAGER_ROLES = ['Administrator', 'Department Manager', 'Project Manager'];
+
 // Create folder
 router.post(
   '/',
   authenticate,
-  authorize('Administrator', 'Manager', 'User'),
+  authorize('Administrator', 'Department Manager', 'Project Manager', 'User'),
   async (req, res) => {
     try {
       const { name, parent_id } = req.body;
@@ -31,11 +33,11 @@ router.post(
 router.get(
   '/',
   authenticate,
-  authorize('Administrator', 'Manager', 'User', 'Guest'),
+  authorize('Administrator', 'Department Manager', 'Project Manager', 'User', 'Guest'),
   async (req, res) => {
     try {
       let result;
-      if (['Administrator', 'Manager'].includes(req.user.role)) {
+      if (MANAGER_ROLES.includes(req.user.role)) {
         result = await pool.query(
           `SELECT f.*, u.email as owner_email
            FROM folders f
@@ -63,14 +65,11 @@ router.get(
 router.delete(
   '/:id',
   authenticate,
-  authorize('Administrator', 'Manager', 'User'),
+  authorize('Administrator', 'Department Manager', 'Project Manager', 'User'),
   async (req, res) => {
     try {
       const { id } = req.params;
-      const folder = await pool.query(
-        'SELECT * FROM folders WHERE id = $1',
-        [id]
-      );
+      const folder = await pool.query('SELECT * FROM folders WHERE id = $1', [id]);
       if (folder.rows.length === 0) {
         return res.status(404).json({ message: 'Folder not found' });
       }

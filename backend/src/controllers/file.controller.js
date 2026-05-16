@@ -278,7 +278,7 @@ const listDeletedFiles = async (req, res) => {
          WHERE f.is_deleted = TRUE
          ORDER BY f.uploaded_at DESC`
       );
-    } else if (['Manager', 'User'].includes(req.user.role)) {
+    } else if (['Department Manager', 'Project Manager', 'User'].includes(req.user.role)) {
       result = await pool.query(
         `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
                 f.sensitivity_level, f.project_category, f.department,
@@ -455,7 +455,7 @@ const shareFile = async (req, res) => {
     const { id } = req.params;
     const { granted_to_email, permission_level = 'viewer' } = req.body;
 
-    if (req.user.role !== 'Manager') {
+    if (!['Department Manager', 'Project Manager'].includes(req.user.role)) {
       return res.status(403).json({ message: 'Only Managers can share files' });
     }
 
@@ -473,19 +473,20 @@ const shareFile = async (req, res) => {
       return res.status(403).json({ message: 'You can only share files you own' });
     }
 
-    const userResult = await pool.query(
-      `SELECT u.id, u.email, u.department, r.name as role
-       FROM users u
-       JOIN roles r ON u.role_id = r.id
-       WHERE u.email = $1 AND u.is_active = TRUE`,
-      [granted_to_email]
-    );
+    const result = await pool.query(
+      `SELECT u.id, u.email, u.full_name, u.is_active, u.department,
+          r.name as role
+        FROM users u
+        JOIN roles r ON u.role_id = r.id
+        WHERE u.id = $1`,
+        [decoded.userId]
+      );
 
-    if (userResult.rows.length === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const targetUser = userResult.rows[0];
+    const targetUser = result.rows[0];
 
     if (!['User', 'Guest'].includes(targetUser.role)) {
       return res.status(403).json({
@@ -493,10 +494,7 @@ const shareFile = async (req, res) => {
       });
     }
 
-    const managerResult = await pool.query(
-      'SELECT department FROM users WHERE id = $1', [req.user.id]
-    );
-    const managerDept = managerResult.rows[0]?.department;
+    const managerDept = req.user.department;
     const sameDepartment = managerDept && targetUser.department === managerDept;
     const sameProject = file.project_category && file.project_category.trim() !== '';
 
@@ -529,8 +527,43 @@ const shareFile = async (req, res) => {
   }
 };
 
+const getStorageStats = async (req, res) => {
+  try {
+    const TOTAL_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB per user
+
+    const result = await pool.query(
+      `SELECT
+        COALESCE(SUM(f.size_bytes), 0)::bigint          AS used_bytes,
+        COUNT(f.id)::int                                 AS file_count,
+        COALESCE(SUM(
+          CASE WHEN fp.file_id IS NOT NULL
+               THEN f.size_bytes ELSE 0 END
+        ), 0)::bigint                                    AS shared_bytes
+       FROM files f
+       LEFT JOIN (
+         SELECT DISTINCT file_id
+         FROM file_permissions
+         WHERE granted_by_user_id = $1
+       ) fp ON fp.file_id = f.id
+       WHERE f.owner_id = $1 AND f.is_deleted = FALSE`,
+      [req.user.id]
+    );
+
+    const { used_bytes, file_count, shared_bytes } = result.rows[0];
+
+    res.json({
+      used_bytes:   Number(used_bytes),
+      shared_bytes: Number(shared_bytes),
+      file_count:   Number(file_count),
+      total_bytes:  TOTAL_BYTES,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch storage stats' });
+  }
+};
+
 module.exports = {
   upload, download, listFiles, listSharedFiles,
   listDeletedFiles, restoreFile, permanentDelete,
-  searchFiles, deleteFileRecord, shareFile
+  searchFiles, deleteFileRecord, shareFile, getStorageStats
 };

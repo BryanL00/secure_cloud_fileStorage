@@ -354,21 +354,29 @@ const UserDashboard = () => {
             CloudFortify <span style={{ color: '#64748B', fontWeight: '400' }}>Space</span>
           </div>
           <div style={{ fontSize: '12px', color: '#64748B' }}>
-            Using <strong style={{ color: '#0F172A' }}>{fmt(totalSize)}</strong> of 112 GB
+            Using <strong style={{ color: '#0F172A' }}>{fmt(storage.used_bytes)}</strong> of {fmt(storage.total_bytes)}
           </div>
         </div>
-        <div style={{ display: 'flex', height: '14px', borderRadius: '99px', overflow: 'hidden', gap: '2px', marginBottom: '12px' }}>
-          <div style={{ flex: 6,   background: '#6366F1', borderRadius: '99px 0 0 99px' }}/>
-          <div style={{ flex: 2.4, background: '#F59E0B' }}/>
-          <div style={{ flex: 1.6, background: '#EF4444', borderRadius: '0 99px 99px 0' }}/>
-          <div style={{ flex: 2,   background: '#E2E8F0' }}/>
-        </div>
+
+        {/* Bar: own files | shared | unused */}
+        {(() => {
+          const ownPct    = (storage.used_bytes - storage.shared_bytes) / storage.total_bytes * 100;
+          const sharedPct = storage.shared_bytes / storage.total_bytes * 100;
+          const unusedPct = Math.max(100 - ownPct - sharedPct, 0);
+          return (
+            <div style={{ display: 'flex', height: '14px', borderRadius: '99px', overflow: 'hidden', gap: '2px', marginBottom: '12px' }}>
+              <div style={{ width: `${ownPct}%`,    background: '#6366F1', borderRadius: '99px 0 0 99px', minWidth: ownPct > 0 ? '4px' : '0' }}/>
+              <div style={{ width: `${sharedPct}%`, background: '#F59E0B', minWidth: sharedPct > 0 ? '4px' : '0' }}/>
+              <div style={{ width: `${unusedPct}%`, background: '#E2E8F0', borderRadius: '0 99px 99px 0', minWidth: unusedPct > 0 ? '4px' : '0' }}/>
+            </div>
+          );
+        })()}
+
         <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
           {[
-            { dot: '#6366F1', label: 'Regular files (60 GB)' },
-            { dot: '#F59E0B', label: 'Replay (24 GB)' },
-            { dot: '#EF4444', label: 'Shared files (16 GB)' },
-            { dot: '#94A3B8', label: 'Unused (12 GB)' },
+            { dot: '#6366F1', label: `My files (${fmt(storage.used_bytes - storage.shared_bytes)})` },
+            { dot: '#F59E0B', label: `Shared by me (${fmt(storage.shared_bytes)})` },
+            { dot: '#94A3B8', label: `Unused (${fmt(Math.max(storage.total_bytes - storage.used_bytes, 0))})` },
           ].map(({ dot, label }) => (
             <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <div style={{ width: '9px', height: '9px', borderRadius: '50%', background: dot, flexShrink: 0 }}/>

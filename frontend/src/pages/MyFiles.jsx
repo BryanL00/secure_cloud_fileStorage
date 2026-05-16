@@ -19,8 +19,8 @@ const MyFiles = () => {
   const [deleting, setDeleting]         = useState(false);
   const [uploadForm, setUploadForm]     = useState({ file: null, sensitivity_level: 'low', project_category: '', department: '' });
 
-  const canUpload = ['Manager', 'User'].includes(user?.role);
-  const canDelete = ['Manager', 'User'].includes(user?.role);
+  const canUpload = ['Department Manager', 'Project Manager', 'User'].includes(user?.role);
+  const canDelete = ['Department Manager', 'Project Manager', 'User'].includes(user?.role);
 
   const fetchData = async () => {
     try {
