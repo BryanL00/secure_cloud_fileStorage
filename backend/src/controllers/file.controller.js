@@ -478,8 +478,8 @@ const shareFile = async (req, res) => {
           r.name as role
         FROM users u
         JOIN roles r ON u.role_id = r.id
-        WHERE u.id = $1`,
-        [decoded.userId]
+        WHERE u.email = $1`,
+        [granted_to_email]
       );
 
     if (result.rows.length === 0) {
@@ -488,19 +488,18 @@ const shareFile = async (req, res) => {
 
     const targetUser = result.rows[0];
 
-    if (!['User', 'Guest'].includes(targetUser.role)) {
+    if (!['User', 'Guest', 'Project Manager'].includes(targetUser.role)) {
       return res.status(403).json({
-        message: 'Files can only be shared with User or Guest roles'
+        message: 'Files can only be shared with User, Guest, or Project Manager roles'
       });
     }
 
     const managerDept = req.user.department;
     const sameDepartment = managerDept && targetUser.department === managerDept;
-    const sameProject = file.project_category && file.project_category.trim() !== '';
 
-    if (!sameDepartment && !sameProject) {
+    if (!sameDepartment) {
       return res.status(403).json({
-        message: 'You can only share files within your department or project'
+        message: 'You can only share files with users in the same department'
       });
     }
 

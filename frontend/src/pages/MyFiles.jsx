@@ -18,9 +18,12 @@ const MyFiles = () => {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [deleting, setDeleting]         = useState(false);
   const [uploadForm, setUploadForm]     = useState({ file: null, sensitivity_level: 'low', project_category: '', department: '' });
-
+  const [shareModal, setShareModal]     = useState(null);
+  const [shareEmail, setShareEmail]     = useState('');
+  const [sharing, setSharing]           = useState(false);
   const canUpload = ['Department Manager', 'Project Manager', 'User'].includes(user?.role);
   const canDelete = ['Department Manager', 'Project Manager', 'User'].includes(user?.role);
+  const canShare  = ['Department Manager', 'Project Manager'].includes(user?.role);
 
   const fetchData = async () => {
     try {
@@ -113,6 +116,18 @@ const MyFiles = () => {
     } catch { setError('Download failed'); }
   };
 
+  const handleShare = async (e) => {
+  e.preventDefault();
+  if (!shareEmail.trim() || !shareModal) return;
+  setSharing(true); setError(''); setSuccess('');
+  try {
+    await api.post(`/files/${shareModal.id}/share`, { granted_to_email: shareEmail.trim() });
+    setSuccess(`File shared with ${shareEmail.trim()}`);
+    setShareModal(null); setShareEmail('');
+  } catch (err) { setError(err.response?.data?.message || 'Share failed'); }
+  finally { setSharing(false); }
+};
+
   const handleDeleteFile   = (fileId) => api.delete(`/files/${fileId}`);
 
   const handleSingleDelete = async (fileId) => {
@@ -160,7 +175,24 @@ const MyFiles = () => {
   const fieldStyle        = { flex: '1', minWidth: '120px' };
 
   return (
+    
     <div>
+    {shareModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="neu-raised" style={{ padding: '28px', width: '400px', borderRadius: '16px', background: '#fff' }}>
+            <div style={{ fontSize: '16px', fontWeight: '700', color: '#0F172A', marginBottom: '4px' }}>Share File</div>
+            <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '20px' }}>{shareModal.original_name}</div>
+            <form onSubmit={handleShare}>
+              <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>Recipient email (User or Guest only)</label>
+              <input className="neu-input" type="email" placeholder="user@example.com" value={shareEmail} onChange={e => setShareEmail(e.target.value)} autoFocus required style={{ width: '100%', marginBottom: '16px', boxSizing: 'border-box' }} />
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button type="button" className="neu-btn" onClick={() => { setShareModal(null); setShareEmail(''); }}>Cancel</button>
+                <button type="submit" className="neu-btn-primary" disabled={sharing}>{sharing ? 'Sharing…' : 'Share'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <div>
@@ -343,6 +375,9 @@ const MyFiles = () => {
                         <div style={{ fontSize: '12px', color: '#64748B' }}>{formatSize(file.size_bytes)}</div>
                         <div style={{ display: 'flex', gap: '6px' }}>
                           <button className="neu-btn" style={{ padding: '5px 10px', fontSize: '11px' }} onClick={() => handleDownload(file.id, file.original_name)}>Download</button>
+                          {canShare && isOwner && (
+                            <button className="neu-btn" style={{ padding: '5px 10px', fontSize: '11px', color: '#2563EB' }} onClick={() => { setShareModal(file); setShareEmail(''); }}>Share</button>
+                          )}
                           {canDeleteThis && (
                             <button className="neu-btn" style={{ padding: '5px 10px', fontSize: '11px', color: '#DC2626' }} onClick={() => handleSingleDelete(file.id)}>Delete</button>
                           )}
