@@ -2,7 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import MyFiles from './pages/Myfiles';
+import MyFiles from './pages/MyFiles';
 import AdminPanel from './pages/AdminPanel';
 import SharedFiles from './pages/SharedFiles';
 import Vault from './pages/Vault';
@@ -24,12 +24,12 @@ function App() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="my-files" element={<MyFiles />} />
         <Route path="shared-files" element={
-          <PrivateRoute allowedRoles={['Manager', 'User', 'Guest']}>
+          <PrivateRoute allowedRoles={['Department Manager', 'Project Manager', 'User', 'Guest']}>
             <SharedFiles />
           </PrivateRoute>
         } />
         <Route path="vault" element={
-          <PrivateRoute allowedRoles={['Administrator', 'Manager', 'User']}>
+          <PrivateRoute allowedRoles={['Administrator', 'Department Manager', 'Project Manager', 'User']}>
             <Vault />
           </PrivateRoute>
         } />

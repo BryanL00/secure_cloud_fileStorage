@@ -116,21 +116,22 @@ const NavItem = ({ label, icon, isActive, onClick }) => (
   </div>
 );
 
-const fmt = (bytes) => {
+
+const fmtStorage = (bytes) => {
   if (!bytes) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1048576).toFixed(1)} MB`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 };
 
 const Layout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [storage, setStorage] = useState({ used_bytes: 0, shared_bytes: 0, file_count: 0, total_bytes: 10 * 1024 * 1024 * 1024 });
+    const [storage, setStorage] = useState({ used_bytes: 0, total_bytes: 10 * 1024 * 1024 * 1024 });
 
   useEffect(() => {
-  if (user?.role === 'Administrator') return;
-  api.get('/files/storage').then(res => setStorage(res.data)).catch(() => {});
+    if (user?.role === 'Administrator') return;
+    api.get('/files/storage').then(res => setStorage(res.data)).catch(() => {});
   }, [user]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -258,34 +259,38 @@ const Layout = () => {
         </div>
 
           {/* Storage indicator */}
-          <div style={{ padding: '16px', borderTop: '1px solid #F1F5F9' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
-              <span style={{ fontSize: '13px', fontWeight: '600', color: '#334155' }}>Storage</span>
-            </div>
-            <div style={{ height: '6px', background: '#E2E8F0', borderRadius: '99px', marginBottom: '6px', overflow: 'hidden' }}>
-              <div style={{
-                width: `${Math.min((storage.used_bytes / storage.total_bytes) * 100, 100).toFixed(1)}%`,
-                height: '100%',
-                background: storage.used_bytes / storage.total_bytes > 0.85
-                  ? 'linear-gradient(90deg, #EF4444, #DC2626)'
-                  : 'linear-gradient(90deg, #22C55E, #16A34A)',
-                borderRadius: '99px',
-                transition: 'width 0.4s ease',
-              }} />
-            </div>
-            <div style={{ fontSize: '11px', color: '#94A3B8', marginBottom: '12px' }}>
-              {fmt(storage.used_bytes)} of {fmt(storage.total_bytes)} used
-            </div>
-            <button onClick={handleLogout} style={{
-              width: '100%', padding: '10px', background: '#0F172A', color: '#FFFFFF',
-              border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600',
-            }}>
-              Sign Out
-            </button>
-          </div>
+        <div style={{ padding: '16px', borderTop: '1px solid #F1F5F9' }}>
+          {user?.role !== 'Administrator' && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                <span style={{ fontSize: '13px', fontWeight: '600', color: '#334155' }}>Storage</span>
+              </div>
+              <div style={{ height: '6px', background: '#E2E8F0', borderRadius: '99px', marginBottom: '6px', overflow: 'hidden' }}>
+                <div style={{
+                  width: `${Math.min((storage.used_bytes / storage.total_bytes) * 100, 100).toFixed(1)}%`,
+                  height: '100%',
+                  background: (storage.used_bytes / storage.total_bytes) > 0.85
+                    ? 'linear-gradient(90deg, #EF4444, #DC2626)'
+                    : 'linear-gradient(90deg, #22C55E, #16A34A)',
+                  borderRadius: '99px',
+                  transition: 'width 0.4s ease',
+                }} />
+              </div>
+              <div style={{ fontSize: '11px', color: '#94A3B8', marginBottom: '12px' }}>
+                {fmtStorage(storage.used_bytes)} of {fmtStorage(storage.total_bytes)} used
+              </div>
+            </>
+          )}
+          <button onClick={handleLogout} style={{
+            width: '100%', padding: '10px', background: '#0F172A', color: '#FFFFFF',
+            border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600',
+          }}>
+            Sign Out
+          </button>
+        </div>
 
         {/* Notification & Help */}
         <div style={{ padding: '8px 12px 20px', borderTop: '1px solid #F1F5F9', display: 'flex', flexDirection: 'column', gap: '2px' }}>

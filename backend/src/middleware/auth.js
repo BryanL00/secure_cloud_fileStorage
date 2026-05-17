@@ -15,8 +15,8 @@ const authenticate = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // Load fresh user + role from database
-    const result = await pool.query(
-      `SELECT u.id, u.email, u.full_name, u.is_active, 
+       const result = await pool.query(
+      `SELECT u.id, u.email, u.full_name, u.is_active, u.department,
               r.name as role
        FROM users u
        JOIN roles r ON u.role_id = r.id

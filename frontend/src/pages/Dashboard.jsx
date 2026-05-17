@@ -293,17 +293,22 @@ const UserDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [activeTab, setActiveTab] = useState('12 Months');
+  const [storage, setStorage] = useState({ used_bytes: 0, shared_bytes: 0, total_bytes: 10 * 1024 * 1024 * 1024 });
 
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const res = await api.get('/files');
-        setFiles(res.data.files || []);
-      } catch { setError('Failed to load data'); }
-      finally { setLoading(false); }
-    };
-    fetch();
-  }, []);
+useEffect(() => {
+  const fetch = async () => {
+    try {
+      const [filesRes, storageRes] = await Promise.all([
+        api.get('/files'),
+        api.get('/files/storage'),
+      ]);
+      setFiles(filesRes.data.files || []);
+      setStorage(storageRes.data);
+    } catch { setError('Failed to load data'); }
+    finally { setLoading(false); }
+  };
+  fetch();
+}, []);
 
   const counts = { documents: 0, images: 0, videos: 0, others: 0 };
   const sizes  = { documents: 0, images: 0, videos: 0, others: 0 };
