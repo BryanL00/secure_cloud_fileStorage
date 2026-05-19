@@ -1,39 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../utils/db');
+const rateLimit = require('express-rate-limit');
+const { register, login, logout, getMe } = require('../controllers/auth.controller');
 const { authenticate, authorize } = require('../middleware/auth');
 
-// Get all audit logs — Admin only
-router.get(
-  '/',
-  authenticate,
-  authorize('Administrator'),
-  async (req, res) => {
-    try {
-      const { action, limit = 100, offset = 0 } = req.query;
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { message: 'Too many login attempts. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
-      let query = `
-        SELECT id, user_email, user_role, action,
-               resource, details, ip_address, created_at
-        FROM audit_logs
-      `;
-      const params = [];
-
-      if (action) {
-        query += ` WHERE action = $1`;
-        params.push(action);
-      }
-
-      query += ` ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-      params.push(limit, offset);
-
-      const result = await pool.query(query, params);
-      res.json({ logs: result.rows });
-
-    } catch (error) {
-      res.status(500).json({ message: 'Failed to fetch logs', error: error.message });
-    }
-  }
-);
+router.post('/register', authenticate, authorize('Administrator'), register);
+router.post('/login', loginLimiter, login);
+router.post('/logout', authenticate, logout);
+router.get('/me', authenticate, getMe);
 
 module.exports = router;

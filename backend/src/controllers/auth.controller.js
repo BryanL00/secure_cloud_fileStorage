@@ -5,9 +5,33 @@ const { log, ACTIONS } = require('../utils/auditLog');
 
 const DEPARTMENTS = ['IT', 'Finance', 'Marketing', 'HR', 'Operations'];
 
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
+
+function validatePassword(password) {
+  if (!password || password.length < 8) {
+    return 'Password must be at least 8 characters long';
+  }
+  if (!PASSWORD_REGEX.test(password)) {
+    return 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (e.g. !@#$%^&*)';
+  }
+  return null;
+}
+
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax',
+  maxAge: 8 * 60 * 60 * 1000, // 8 hours — matches JWT expiry
+};
+
 const register = async (req, res) => {
   try {
     const { email, password, full_name, role_name, department } = req.body;
+
+    const pwError = validatePassword(password);
+    if (pwError) {
+      return res.status(400).json({ message: pwError });
+    }
 
     if (department && !DEPARTMENTS.includes(department)) {
       return res.status(400).json({ message: 'Invalid department' });
@@ -50,13 +74,17 @@ const register = async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({ message: 'Registration failed', error: error.message });
+    res.status(500).json({ message: 'Registration failed' });
   }
 };
 
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
 
     const result = await pool.query(
       `SELECT u.id, u.email, u.full_name, u.password_hash,
@@ -95,9 +123,10 @@ const login = async (req, res) => {
       req.ip
     );
 
+    res.cookie('token', token, COOKIE_OPTIONS);
+
     res.json({
       message: 'Login successful',
-      token,
       user: {
         id: user.id,
         email: user.email,
@@ -108,8 +137,22 @@ const login = async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({ message: 'Login failed', error: error.message });
+    res.status(500).json({ message: 'Login failed' });
   }
+};
+
+const logout = async (req, res) => {
+  try {
+    await log(
+      req.user.id, req.user.email, req.user.role,
+      ACTIONS.LOGOUT, 'auth', req.user.id,
+      'User logged out',
+      req.ip
+    );
+  } catch { /* audit failure is non-fatal */ }
+
+  res.clearCookie('token', COOKIE_OPTIONS);
+  res.json({ message: 'Logged out successfully' });
 };
 
 const getMe = async (req, res) => {
@@ -124,8 +167,8 @@ const getMe = async (req, res) => {
     );
     res.json({ user: result.rows[0] });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to get user', error: error.message });
+    res.status(500).json({ message: 'Failed to get user' });
   }
 };
 
-module.exports = { register, login, getMe };
+module.exports = { register, login, logout, getMe };

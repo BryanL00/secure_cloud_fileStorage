@@ -1,26 +1,26 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import api from '../utils/api';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  const savedUser = localStorage.getItem('user');
-  const savedToken = localStorage.getItem('token');
+  const [user, setUser]     = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const [user, setUser] = useState(
-    savedUser && savedToken ? JSON.parse(savedUser) : null
-  );
-  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    api.get('/auth/me')
+      .then(res => setUser(res.data.user))
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
+  }, []);
 
-  const login = (userData, token) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(userData));
+  const login = (userData) => {
     setUser(userData);
   };
 
-  const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setUser(null);
+  const logout = async () => {
+    setUser(null); // clear state immediately so PrivateRoute redirects instantly
+    try { await api.post('/auth/logout'); } catch { /* ignore — cookie cleared server-side */ }
   };
 
   return (

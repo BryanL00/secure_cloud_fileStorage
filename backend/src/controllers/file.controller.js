@@ -381,7 +381,9 @@ const searchFiles = async (req, res) => {
       return res.json({ files: [] });
     }
 
-    const searchTerm = `%${q.trim().toLowerCase()}%`;
+    const raw = q.trim().toLowerCase();
+    const escapedQ = raw.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+    const searchTerm = `%${escapedQ}%`;
 
     const result = await pool.query(
       `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,

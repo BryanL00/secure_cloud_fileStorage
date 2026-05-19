@@ -3,19 +3,14 @@ const pool = require('../utils/db');
 
 const authenticate = async (req, res, next) => {
   try {
-    // Get token from header
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const token = req.cookies?.token;
+    if (!token) {
       return res.status(401).json({ message: 'No token provided' });
     }
 
-    const token = authHeader.split(' ')[1];
-
-    // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Load fresh user + role from database
-       const result = await pool.query(
+    const result = await pool.query(
       `SELECT u.id, u.email, u.full_name, u.is_active, u.department,
               r.name as role
        FROM users u
@@ -34,7 +29,6 @@ const authenticate = async (req, res, next) => {
       return res.status(401).json({ message: 'Account is deactivated' });
     }
 
-    // Attach user to request
     req.user = user;
     next();
 
@@ -43,7 +37,6 @@ const authenticate = async (req, res, next) => {
   }
 };
 
-// Check if user has required role
 const authorize = (...allowedRoles) => {
   return (req, res, next) => {
     if (!allowedRoles.includes(req.user.role)) {
