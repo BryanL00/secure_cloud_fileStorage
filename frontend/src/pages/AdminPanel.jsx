@@ -3,8 +3,17 @@ import api from '../utils/api';
 
 const DEPARTMENTS = ['IT', 'Finance', 'Marketing', 'HR', 'Operations'];
 const ROLES       = ['Administrator', 'Department Manager', 'Project Manager', 'User', 'Guest'];
-const USERS_COLS  = '1.5fr 1.5fr 1.4fr 1fr 1fr 1fr';
-const EMPTY_FORM  = { full_name: '', email: '', password: '', role_name: 'User', department: '' };
+const ALL_ACTIONS = [
+  'LOGIN', 'LOGOUT', 'REGISTER',
+  'FILE_UPLOAD', 'FILE_DOWNLOAD', 'FILE_DELETE', 'FILE_SHARE',
+  'FILE_ENCRYPT', 'FILE_DECRYPT', 'FILE_RESTORE', 'FILE_PERMANENT_DELETE',
+  'FOLDER_CREATE', 'FOLDER_DELETE',
+  'USER_ROLE_UPDATE', 'USER_DEACTIVATE',
+  'ACCESS_DENIED', 'ACCESS_EVAL',
+];
+
+const USERS_COLS = '1.5fr 1.5fr 1.4fr 1fr 1fr 1fr';
+const EMPTY_FORM = { full_name: '', email: '', password: '', role_name: 'User', department: '' };
 
 const ROLE_COLORS = {
   Administrator:        { bg: '#EDE9FE', text: '#7C3AED' },
@@ -42,15 +51,21 @@ const PersonIcon = ({ color }) => (
 
 const AdminPanel = () => {
   const [users, setUsers]             = useState([]);
-  const [logs, setLogs]               = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [logsLoading, setLogsLoading] = useState(true);
-  const [error, setError]             = useState('');
+  const [logs,  setLogs]              = useState([]);
+  const [loading,      setLoading]    = useState(true);
+  const [logsLoading,  setLogsLoading]= useState(true);
+  const [error,   setError]           = useState('');
   const [success, setSuccess]         = useState('');
   const [activeTab, setActiveTab]     = useState('users');
   const [createForm, setCreateForm]   = useState(EMPTY_FORM);
   const [createLoading, setCreateLoading] = useState(false);
-  const [showPassword, setShowPassword]   = useState(false);
+  const [showPassword,  setShowPassword]  = useState(false);
+
+  // Log filters
+  const [filterAction, setFilterAction] = useState('');
+  const [filterFrom,   setFilterFrom]   = useState('');
+  const [filterTo,     setFilterTo]     = useState('');
+  const [exportLoading, setExportLoading] = useState(false);
 
   const fetchUsers = async () => {
     try { const res = await api.get('/users'); setUsers(res.data.users); }
@@ -58,13 +73,55 @@ const AdminPanel = () => {
     finally { setLoading(false); }
   };
 
-  const fetchLogs = async () => {
-    try { const res = await api.get('/audit'); setLogs(res.data.logs); }
-    catch { setError('Failed to load logs'); }
-    finally { setLogsLoading(false); }
+  // Accept explicit values to avoid stale-closure issues when called from onChange handlers
+  const fetchLogs = async (action = filterAction, from = filterFrom, to = filterTo) => {
+    setLogsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (action) params.set('action', action);
+      if (from)   params.set('from',   from);
+      if (to)     params.set('to',     to);
+      const res = await api.get(`/audit?${params}`);
+      setLogs(res.data.logs);
+    } catch {
+      setError('Failed to load logs');
+    } finally {
+      setLogsLoading(false);
+    }
   };
 
   useEffect(() => { fetchUsers(); fetchLogs(); }, []);
+
+  const handleExport = async () => {
+    setExportLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filterAction) params.set('action', filterAction);
+      if (filterFrom)   params.set('from',   filterFrom);
+      if (filterTo)     params.set('to',     filterTo);
+
+      const res = await api.get(`/audit/export?${params}`, { responseType: 'blob' });
+
+      const dateTag = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(res.data);
+      const a   = document.createElement('a');
+      a.href     = url;
+      a.download = `audit-logs-${dateTag}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('CSV export failed');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const clearFilters = () => {
+    setFilterAction('');
+    setFilterFrom('');
+    setFilterTo('');
+    fetchLogs('', '', '');
+  };
 
   const clearMessages = () => { setError(''); setSuccess(''); };
 
@@ -216,31 +273,36 @@ const AdminPanel = () => {
                 onChange={e => setCreateForm({ ...createForm, email: e.target.value })} required />
             )}
             {field('Password',
-              <div style={{ position: 'relative' }}>
-                <input
-                  className="neu-input"
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="••••••••"
-                  value={createForm.password}
-                  onChange={e => setCreateForm({ ...createForm, password: e.target.value })}
-                  required minLength={8}
-                  style={{ paddingRight: '44px' }}
-                />
-                <button type="button" onClick={() => setShowPassword(v => !v)}
-                  style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', padding: '2px' }}>
-                  {showPassword ? (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/>
-                      <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/>
-                      <line x1="1" y1="1" x2="23" y2="23"/>
-                    </svg>
-                  ) : (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                      <circle cx="12" cy="12" r="3"/>
-                    </svg>
-                  )}
-                </button>
+              <div>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    className="neu-input"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    value={createForm.password}
+                    onChange={e => setCreateForm({ ...createForm, password: e.target.value })}
+                    required minLength={8}
+                    style={{ paddingRight: '44px' }}
+                  />
+                  <button type="button" onClick={() => setShowPassword(v => !v)}
+                    style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', padding: '2px' }}>
+                    {showPassword ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/>
+                        <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '5px' }}>
+                  Min 8 chars · uppercase · lowercase · number · special character
+                </div>
               </div>
             )}
             {field('Role',
@@ -272,14 +334,74 @@ const AdminPanel = () => {
       {/* Logs tab */}
       {activeTab === 'logs' && (
         <div className="neu-raised" style={{ padding: '0', overflow: 'hidden' }}>
+
+          {/* Header row */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #F1F5F9' }}>
             <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A' }}>Audit Logs</div>
-            <button className="neu-btn" style={{ fontSize: '12px' }} onClick={fetchLogs}>Refresh</button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="neu-btn" style={{ fontSize: '12px', padding: '7px 14px' }} onClick={() => fetchLogs()}>
+                Refresh
+              </button>
+              <button
+                className="neu-btn"
+                style={{ fontSize: '12px', padding: '7px 14px', color: '#16A34A', fontWeight: '600' }}
+                onClick={handleExport}
+                disabled={exportLoading}
+              >
+                {exportLoading ? 'Exporting…' : 'Export CSV'}
+              </button>
+            </div>
           </div>
+
+          {/* Filter bar */}
+          <div style={{ display: 'flex', gap: '10px', padding: '12px 20px', borderBottom: '1px solid #F1F5F9', alignItems: 'center', flexWrap: 'wrap', background: '#FAFAFA' }}>
+            <select
+              className="neu-input"
+              style={{ fontSize: '12px', padding: '7px 10px', minWidth: '160px' }}
+              value={filterAction}
+              onChange={e => { const v = e.target.value; setFilterAction(v); fetchLogs(v, filterFrom, filterTo); }}
+            >
+              <option value="">All actions</option>
+              {ALL_ACTIONS.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '11px', color: '#94A3B8', whiteSpace: 'nowrap' }}>From</span>
+              <input
+                type="date"
+                className="neu-input"
+                style={{ fontSize: '12px', padding: '7px 10px' }}
+                value={filterFrom}
+                onChange={e => { const v = e.target.value; setFilterFrom(v); fetchLogs(filterAction, v, filterTo); }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '11px', color: '#94A3B8', whiteSpace: 'nowrap' }}>To</span>
+              <input
+                type="date"
+                className="neu-input"
+                style={{ fontSize: '12px', padding: '7px 10px' }}
+                value={filterTo}
+                onChange={e => { const v = e.target.value; setFilterTo(v); fetchLogs(filterAction, filterFrom, v); }}
+              />
+            </div>
+
+            {(filterAction || filterFrom || filterTo) && (
+              <button className="neu-btn" style={{ fontSize: '11px', padding: '6px 12px', color: '#64748B' }} onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+
+            <div style={{ marginLeft: 'auto', fontSize: '11px', color: '#94A3B8' }}>
+              {logs.length} {logs.length === 100 ? '(showing latest 100)' : 'entries'}
+            </div>
+          </div>
+
           {logsLoading ? (
             <div style={{ padding: '48px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>Loading logs…</div>
           ) : logs.length === 0 ? (
-            <div style={{ padding: '48px', textAlign: 'center', fontSize: '13px', color: '#94A3B8' }}>No logs yet</div>
+            <div style={{ padding: '48px', textAlign: 'center', fontSize: '13px', color: '#94A3B8' }}>No logs match your filters</div>
           ) : (
             <div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 2fr 1fr', gap: '8px', padding: '12px 20px', borderBottom: '1px solid #F1F5F9' }}>
@@ -287,15 +409,15 @@ const AdminPanel = () => {
                   <div key={h} style={{ fontSize: '11px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</div>
                 ))}
               </div>
-              {logs.map((log, idx) => {
-                const color = ACTION_COLORS[log.action] || '#64748B';
+              {logs.map((entry, idx) => {
+                const color = ACTION_COLORS[entry.action] || '#64748B';
                 return (
-                  <div key={log.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 2fr 1fr', gap: '8px', padding: '13px 20px', alignItems: 'center', borderBottom: idx < logs.length - 1 ? '1px solid #F8FAFC' : 'none' }}>
-                    <div style={{ fontSize: '12px', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.user_email || 'System'}</div>
-                    <div style={{ fontSize: '11px', color: '#64748B' }}>{log.user_role || '—'}</div>
-                    <div><span className="badge" style={{ background: `${color}15`, color, fontSize: '10px' }}>{log.action}</span></div>
-                    <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.details || '—'}</div>
-                    <div style={{ fontSize: '11px', color: '#94A3B8' }}>{new Date(log.created_at).toLocaleString()}</div>
+                  <div key={entry.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 2fr 1fr', gap: '8px', padding: '13px 20px', alignItems: 'center', borderBottom: idx < logs.length - 1 ? '1px solid #F8FAFC' : 'none' }}>
+                    <div style={{ fontSize: '12px', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.user_email || 'System'}</div>
+                    <div style={{ fontSize: '11px', color: '#64748B' }}>{entry.user_role || '—'}</div>
+                    <div><span className="badge" style={{ background: `${color}15`, color, fontSize: '10px' }}>{entry.action}</span></div>
+                    <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.details || '—'}</div>
+                    <div style={{ fontSize: '11px', color: '#94A3B8' }}>{new Date(entry.created_at).toLocaleString()}</div>
                   </div>
                 );
               })}
