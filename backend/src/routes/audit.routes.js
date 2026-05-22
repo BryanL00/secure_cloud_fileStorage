@@ -47,7 +47,6 @@ function buildCSV(rows) {
 }
 
 // GET /api/audit — paginated log view with optional filters
-// Admin ONLY
 router.get(
   '/',
   authenticate,
