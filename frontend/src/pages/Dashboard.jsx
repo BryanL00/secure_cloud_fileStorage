@@ -151,135 +151,523 @@ const CATEGORY_META = {
   others:    { label: 'Others',    icon: <IconOther />, iconBg: '#F8FAFC' },
 };
 
+/* ── Mini bar chart for daily activity ── */
+const DailyBarChart = ({ dailyCounts }) => {
+  const W = 420, H = 80, PAD = { top: 8, bottom: 20, left: 0, right: 0 };
+  const days = dailyCounts.slice(-14);
+  if (!days.length) return <div style={{ height: H, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: '#94A3B8' }}>No data</div>;
+  const maxV = Math.max(...days.map(d => d.count), 1);
+  const barW = (W - PAD.left - PAD.right) / days.length - 3;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
+      {days.map((d, i) => {
+        const x = PAD.left + i * ((W - PAD.left - PAD.right) / days.length) + 1.5;
+        const chartH = H - PAD.top - PAD.bottom;
+        const bH = Math.max((d.count / maxV) * chartH, 2);
+        const y = PAD.top + chartH - bH;
+        const isToday = d.day === new Date().toISOString().slice(0, 10);
+        return (
+          <g key={d.day}>
+            <rect x={x} y={y} width={barW} height={bH} fill={isToday ? '#6366F1' : '#CBD5E1'} rx="2"/>
+            {i % 3 === 0 && (
+              <text x={x + barW / 2} y={H - 2} textAnchor="middle" fill="#94A3B8" fontSize="7">
+                {d.day.slice(5)}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+/* ── Role donut ── */
+const RoleDonut = ({ users }) => {
+  const ROLES_ORDER = ['Administrator','Department Manager','Project Manager','User','Guest'];
+  const COLORS = ['#8B5CF6','#3B82F6','#F59E0B','#22C55E','#94A3B8'];
+  const counts = ROLES_ORDER.map(r => users.filter(u => u.role === r).length);
+  const total = counts.reduce((a, b) => a + b, 0) || 1;
+  const R = 40, CX = 54, CY = 54, stroke = 16;
+  let offset = 0;
+  const circumference = 2 * Math.PI * R;
+  const slices = counts.map((c, i) => {
+    const pct = c / total;
+    const dash = pct * circumference;
+    const s = { pct, dash, offset: offset * circumference, color: COLORS[i] };
+    offset += pct;
+    return s;
+  });
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      <svg width="108" height="108" viewBox="0 0 108 108" style={{ flexShrink: 0 }}>
+        <circle cx={CX} cy={CY} r={R} fill="none" stroke="#F1F5F9" strokeWidth={stroke}/>
+        {slices.map((s, i) => s.pct > 0 && (
+          <circle key={i} cx={CX} cy={CY} r={R} fill="none" stroke={s.color} strokeWidth={stroke}
+            strokeDasharray={`${s.dash} ${circumference - s.dash}`}
+            strokeDashoffset={circumference / 4 - s.offset}
+            style={{ transform: 'rotate(-90deg)', transformOrigin: `${CX}px ${CY}px` }}/>
+        ))}
+        <text x={CX} y={CY + 5} textAnchor="middle" fill="#0F172A" fontSize="14" fontWeight="700">{total}</text>
+      </svg>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+        {ROLES_ORDER.map((r, i) => (
+          <div key={r} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: COLORS[i], flexShrink: 0 }}/>
+            <span style={{ fontSize: '11px', color: '#64748B' }}>{r.replace('Department ','Dept. ').replace('Project ','Proj. ')}</span>
+            <span style={{ fontSize: '11px', fontWeight: '600', color: '#0F172A', marginLeft: 'auto' }}>{counts[i]}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 /* ══════════════════════════════════════════════
-   Security Audit Trail (Admin view)
+   Admin Dashboard
 ══════════════════════════════════════════════ */
 const SecurityAuditTrail = () => {
-  const [logs, setLogs]           = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [filter, setFilter]       = useState('ALL');
+  const [logs, setLogs]         = useState([]);
+  const [users, setUsers]       = useState([]);
+  const [stats, setStats]       = useState({ action_counts: [], daily_counts: [], top_users: [] });
+  const [loading, setLoading]   = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [filter, setFilter]     = useState('ALL');
+  const [activeSection, setActiveSection] = useState('overview');
   const navigate = useNavigate();
 
-  const fetchLogs = async () => {
+  const fetchAll = async () => {
     try {
-      const res = await api.get('/audit/security?limit=100');
-      setLogs(res.data.logs || []);
+      const [logsRes, usersRes, statsRes] = await Promise.all([
+        api.get('/audit/security?limit=200'),
+        api.get('/users'),
+        api.get('/audit/stats'),
+      ]);
+      setLogs(logsRes.data.logs || []);
+      setUsers(usersRes.data.users || []);
+      setStats(statsRes.data || { action_counts: [], daily_counts: [], top_users: [] });
     } catch { /* silent */ }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchLogs(); }, []);
-
+  useEffect(() => { fetchAll(); }, []);
   useEffect(() => {
     if (!autoRefresh) return;
-    const interval = setInterval(fetchLogs, 15000);
-    return () => clearInterval(interval);
+    const id = setInterval(fetchAll, 15000);
+    return () => clearInterval(id);
   }, [autoRefresh]);
 
-  const filtered = filter === 'ALL' ? logs : logs.filter(l => l.action === filter);
+  const now = Date.now();
+  const last24h = logs.filter(l => now - new Date(l.created_at).getTime() < 86400000);
+  const last7d  = logs.filter(l => now - new Date(l.created_at).getTime() < 7 * 86400000);
 
-  const last24h = new Date(Date.now() - 86400000);
-  const recent  = logs.filter(l => new Date(l.created_at) > last24h);
-  const encryptEvents = recent.filter(l => l.action === 'FILE_ENCRYPT').length;
-  const decryptEvents = recent.filter(l => l.action === 'FILE_DECRYPT').length;
-  const deniedEvents  = recent.filter(l => l.action === 'ACCESS_DENIED').length;
-  const evalEvents    = recent.filter(l => l.action === 'ACCESS_EVAL').length;
+  const count24h = (action) => last24h.filter(l => l.action === action).length;
+  const countAll = (action) => logs.filter(l => l.action === action).length;
 
-  const summaryCards = [
-    { label: 'Encryption Events',  value: encryptEvents, color: '#6366F1', bg: '#EEF2FF', icon: '🔐' },
-    { label: 'Decryption Events',  value: decryptEvents, color: '#16A34A', bg: '#F0FDF4', icon: '🔓' },
-    { label: 'Access Denied',      value: deniedEvents,  color: '#DC2626', bg: '#FEF2F2', icon: '🚫' },
-    { label: 'Access Evaluations', value: evalEvents,    color: '#0284C7', bg: '#E0F2FE', icon: '⚖️' },
+  const statCards = [
+    {
+      label: 'Active Users',
+      value: users.filter(u => u.is_active).length,
+      sub: `${users.length} total`,
+      color: '#6366F1', bg: '#EEF2FF',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
+        </svg>
+      ),
+    },
+    {
+      label: 'File Operations',
+      value: last24h.filter(l => l.action.startsWith('FILE_')).length,
+      sub: `${last7d.filter(l => l.action.startsWith('FILE_')).length} this week`,
+      color: '#0284C7', bg: '#E0F2FE',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+        </svg>
+      ),
+    },
+    {
+      label: 'Access Denied',
+      value: count24h('ACCESS_DENIED'),
+      sub: `${countAll('ACCESS_DENIED')} total`,
+      color: '#DC2626', bg: '#FEE2E2',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+        </svg>
+      ),
+    },
+    {
+      label: 'Logins Today',
+      value: count24h('LOGIN'),
+      sub: `${countAll('LOGOUT')} logouts`,
+      color: '#16A34A', bg: '#F0FDF4',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>
+        </svg>
+      ),
+    },
   ];
 
-  const filterOptions = ['ALL','FILE_ENCRYPT','FILE_DECRYPT','ACCESS_DENIED','ACCESS_EVAL','FILE_UPLOAD','FILE_DOWNLOAD','LOGIN','USER_ROLE_UPDATE'];
+  const FILTER_OPTIONS = ['ALL','FILE_UPLOAD','FILE_DOWNLOAD','FILE_DELETE','FILE_SHARE','FILE_ENCRYPT','FILE_DECRYPT','ACCESS_DENIED','LOGIN','USER_ROLE_UPDATE','USER_DEACTIVATE'];
+  const filtered = filter === 'ALL' ? logs : logs.filter(l => l.action === filter);
+
+  const deptCounts = {};
+  users.forEach(u => { if (u.department) deptCounts[u.department] = (deptCounts[u.department] || 0) + 1; });
+
+  const recentUsers = [...users]
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+    .slice(0, 4);
 
   return (
     <div>
+      {/* Header */}
       <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
-          <div style={{ fontSize: '20px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.3px' }}>Security Audit Trail</div>
-          <div style={{ fontSize: '13px', color: '#64748B', marginTop: '3px' }}>Real-time log of encryption, decryption, and role-based access events</div>
+          <div style={{ fontSize: '20px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.3px' }}>Admin Dashboard</div>
+          <div style={{ fontSize: '13px', color: '#64748B', marginTop: '3px' }}>
+            System overview · Security audit · User management
+            {autoRefresh && <span style={{ color: '#22C55E', marginLeft: '8px', fontWeight: '500' }}>● Live</span>}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <button onClick={() => setAutoRefresh(a => !a)} className={autoRefresh ? 'neu-btn-primary' : 'neu-btn'} style={{ fontSize: '12px', padding: '7px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={() => setAutoRefresh(a => !a)}
+            className={autoRefresh ? 'neu-btn-primary' : 'neu-btn'}
+            style={{ fontSize: '12px', padding: '7px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
             {autoRefresh ? 'Live' : 'Paused'}
           </button>
-          <button onClick={fetchLogs} className="neu-btn" style={{ fontSize: '12px', padding: '7px 14px' }}>Refresh</button>
-          <button onClick={() => navigate('/admin')} className="neu-btn" style={{ fontSize: '12px', padding: '7px 14px' }}>Full Audit Log →</button>
+          <button onClick={fetchAll} className="neu-btn" style={{ fontSize: '12px', padding: '7px 14px' }}>Refresh</button>
+          <button onClick={() => navigate('/admin')} className="neu-btn" style={{ fontSize: '12px', padding: '7px 14px' }}>Manage Users →</button>
         </div>
       </div>
 
-      {/* Summary cards */}
+      {/* Stat cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
-        {summaryCards.map(card => (
+        {statCards.map(card => (
           <div key={card.label} className="neu-raised" style={{ padding: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: card.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>{card.icon}</div>
+              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: card.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: card.color }}>
+                {card.icon}
+              </div>
               <span style={{ fontSize: '10px', color: '#94A3B8' }}>Last 24h</span>
             </div>
-            <div style={{ fontSize: '28px', fontWeight: '700', color: card.color, letterSpacing: '-0.5px' }}>{card.value}</div>
-            <div style={{ fontSize: '12px', color: '#64748B', marginTop: '4px' }}>{card.label}</div>
+            <div style={{ fontSize: '28px', fontWeight: '700', color: card.color, letterSpacing: '-0.5px' }}>{loading ? '—' : card.value}</div>
+            <div style={{ fontSize: '12px', color: '#0F172A', fontWeight: '500', marginTop: '2px' }}>{card.label}</div>
+            <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>{card.sub}</div>
           </div>
         ))}
       </div>
 
-      {/* Filter tabs */}
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap' }}>
-        {filterOptions.map(opt => (
-          <button key={opt} className={filter === opt ? 'neu-btn-primary' : 'neu-btn'} onClick={() => setFilter(opt)} style={{ fontSize: '11px', padding: '6px 14px' }}>
-            {opt === 'ALL' ? 'All Events' : (EVENT_COLORS[opt]?.label || opt)}
+      {/* Section nav */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '20px' }}>
+        {[['overview','Overview'], ['events','Security Events'], ['users','Users & Departments']].map(([id, label]) => (
+          <button key={id} className={activeSection === id ? 'neu-btn-primary' : 'neu-btn'}
+            onClick={() => setActiveSection(id)} style={{ fontSize: '13px', padding: '9px 20px' }}>
+            {label}
           </button>
         ))}
       </div>
 
-      {/* Event log table */}
-      <div className="neu-raised" style={{ padding: '0', overflow: 'hidden' }}>
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid #F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A' }}>
-            Security Events {autoRefresh && <span style={{ fontSize: '11px', color: '#22C55E', marginLeft: '8px', fontWeight: '500' }}>● Live</span>}
+      {/* ── Overview section ── */}
+      {activeSection === 'overview' && (
+        <div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '16px', marginBottom: '16px' }}>
+
+            {/* Activity timeline */}
+            <div className="neu-raised" style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A' }}>Activity — Last 14 Days</div>
+                <span style={{ fontSize: '11px', color: '#94A3B8' }}>Today highlighted</span>
+              </div>
+              {loading
+                ? <div style={{ padding: '24px', textAlign: 'center', fontSize: '12px', color: '#94A3B8' }}>Loading…</div>
+                : <DailyBarChart dailyCounts={stats.daily_counts} />
+              }
+              <div style={{ display: 'flex', gap: '16px', marginTop: '12px', flexWrap: 'wrap' }}>
+                {[
+                  { label: 'Uploads (all time)', value: countAll('FILE_UPLOAD'), color: '#2563EB' },
+                  { label: 'Downloads (all time)', value: countAll('FILE_DOWNLOAD'), color: '#0284C7' },
+                  { label: 'Deletes (all time)', value: countAll('FILE_DELETE'), color: '#DC2626' },
+                  { label: 'Shares (all time)', value: countAll('FILE_SHARE'), color: '#9333EA' },
+                ].map(m => (
+                  <div key={m.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: m.color }}/>
+                    <span style={{ fontSize: '11px', color: '#64748B' }}>{m.label}:</span>
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#0F172A' }}>{m.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* User roles donut */}
+            <div className="neu-raised" style={{ padding: '20px' }}>
+              <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A', marginBottom: '16px' }}>Users by Role</div>
+              {loading
+                ? <div style={{ padding: '24px', textAlign: 'center', fontSize: '12px', color: '#94A3B8' }}>Loading…</div>
+                : <RoleDonut users={users} />
+              }
+              <div style={{ marginTop: '16px', borderTop: '1px solid #F1F5F9', paddingTop: '14px' }}>
+                <div style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', marginBottom: '8px' }}>By Department</div>
+                {Object.entries(deptCounts).length === 0
+                  ? <div style={{ fontSize: '12px', color: '#94A3B8' }}>No departments assigned</div>
+                  : Object.entries(deptCounts).map(([dept, cnt]) => (
+                    <div key={dept} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                      <div style={{ flex: 1, fontSize: '11px', color: '#64748B' }}>{dept}</div>
+                      <div style={{ flex: 2, height: '6px', borderRadius: '3px', background: '#F1F5F9', overflow: 'hidden' }}>
+                        <div style={{ width: `${(cnt / users.length) * 100}%`, height: '100%', background: '#6366F1', borderRadius: '3px' }}/>
+                      </div>
+                      <div style={{ fontSize: '11px', fontWeight: '600', color: '#0F172A', minWidth: '18px', textAlign: 'right' }}>{cnt}</div>
+                    </div>
+                  ))
+                }
+              </div>
+            </div>
           </div>
-          <div style={{ fontSize: '12px', color: '#94A3B8' }}>{filtered.length} events</div>
+
+          {/* Bottom row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '16px' }}>
+
+            {/* Recent events feed */}
+            <div className="neu-raised" style={{ padding: '0', overflow: 'hidden' }}>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid #F1F5F9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A' }}>Recent Events</div>
+                <button onClick={() => setActiveSection('events')} style={{ fontSize: '12px', color: '#6366F1', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '500' }}>View all →</button>
+              </div>
+              {loading ? (
+                <div style={{ padding: '32px', textAlign: 'center', fontSize: '12px', color: '#94A3B8' }}>Loading…</div>
+              ) : logs.length === 0 ? (
+                <div style={{ padding: '32px', textAlign: 'center', fontSize: '12px', color: '#94A3B8' }}>No events yet</div>
+              ) : (
+                <div style={{ maxHeight: '260px', overflowY: 'auto' }}>
+                  {logs.slice(0, 12).map((entry, idx) => {
+                    const ev = EVENT_COLORS[entry.action] || { bg: '#F1F5F9', text: '#64748B', label: entry.action };
+                    return (
+                      <div key={entry.id} style={{
+                        display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 20px',
+                        borderBottom: idx < 11 ? '1px solid #F8FAFC' : 'none',
+                        background: entry.action === 'ACCESS_DENIED' ? '#FFF5F5' : 'transparent',
+                      }}>
+                        <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: ev.text, flexShrink: 0 }}/>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '12px', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {entry.user_email || 'System'}
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#94A3B8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {entry.details || '—'}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: '10px', fontWeight: '700', padding: '2px 7px', borderRadius: '20px', background: ev.bg, color: ev.text, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          {ev.label}
+                        </span>
+                        <div style={{ fontSize: '10px', color: '#94A3B8', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtTime(entry.created_at)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Recent users + most active */}
+            <div className="neu-raised" style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A' }}>Recent Users</div>
+                <button onClick={() => navigate('/admin')} style={{ fontSize: '12px', color: '#6366F1', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '500' }}>Manage →</button>
+              </div>
+              {loading ? (
+                <div style={{ textAlign: 'center', fontSize: '12px', color: '#94A3B8' }}>Loading…</div>
+              ) : recentUsers.length === 0 ? (
+                <div style={{ textAlign: 'center', fontSize: '12px', color: '#94A3B8' }}>No users yet</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {recentUsers.map(u => {
+                    const initials = (u.full_name || u.email).split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+                    return (
+                      <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#EEF2FF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700', color: '#6366F1', flexShrink: 0 }}>
+                          {initials}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '12px', fontWeight: '600', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || '—'}</div>
+                          <div style={{ fontSize: '11px', color: '#94A3B8' }}>{u.role} · {u.department || 'No dept'}</div>
+                        </div>
+                        <span style={{ fontSize: '10px', padding: '2px 7px', borderRadius: '20px', background: u.is_active ? '#DCFCE7' : '#FEE2E2', color: u.is_active ? '#16A34A' : '#DC2626', whiteSpace: 'nowrap' }}>
+                          {u.is_active ? 'Active' : 'Off'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {stats.top_users.length > 0 && (
+                <div style={{ marginTop: '18px', borderTop: '1px solid #F1F5F9', paddingTop: '14px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', marginBottom: '8px' }}>Most Active (7d)</div>
+                  {stats.top_users.slice(0, 3).map((u, i) => (
+                    <div key={u.user_email} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '11px', color: '#94A3B8', minWidth: '14px' }}>{i + 1}.</span>
+                      <div style={{ flex: 1, fontSize: '11px', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.user_email?.split('@')[0]}</div>
+                      <span style={{ fontSize: '11px', fontWeight: '700', color: '#6366F1' }}>{u.event_count}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-        {loading ? (
-          <div style={{ padding: '48px', textAlign: 'center', fontSize: '13px', color: '#94A3B8' }}>Loading security events…</div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: '48px', textAlign: 'center', fontSize: '13px', color: '#94A3B8' }}>No events recorded yet</div>
-        ) : (
-          <div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1.2fr 2fr 1fr', gap: '8px', padding: '10px 20px', borderBottom: '1px solid #F1F5F9' }}>
-              {['User','Role','Event','Details','Time'].map(h => (
-                <div key={h} style={{ fontSize: '10px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</div>
+      )}
+
+      {/* ── Security Events section ── */}
+      {activeSection === 'events' && (
+        <div className="neu-raised" style={{ padding: '0', overflow: 'hidden' }}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid #F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A' }}>All Security Events</div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {FILTER_OPTIONS.map(opt => (
+                <button key={opt} className={filter === opt ? 'neu-btn-primary' : 'neu-btn'}
+                  onClick={() => setFilter(opt)} style={{ fontSize: '10px', padding: '5px 10px' }}>
+                  {opt === 'ALL' ? 'All' : (EVENT_COLORS[opt]?.label || opt.replace('_', ' '))}
+                </button>
               ))}
             </div>
-            <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
-              {filtered.map((log, idx) => {
-                const ev = EVENT_COLORS[log.action] || { bg: '#F1F5F9', text: '#64748B', label: log.action };
-                return (
-                  <div key={log.id} style={{
-                    display: 'grid', gridTemplateColumns: '1.2fr 1fr 1.2fr 2fr 1fr',
-                    gap: '8px', padding: '12px 20px', alignItems: 'center',
-                    borderBottom: idx < filtered.length - 1 ? '1px solid #F8FAFC' : 'none',
-                    background: log.action === 'ACCESS_DENIED' ? '#FFF5F5' : 'transparent',
-                  }}>
-                    <div style={{ fontSize: '12px', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.user_email || 'System'}</div>
-                    <div style={{ fontSize: '11px', color: '#64748B' }}>{log.user_role || '—'}</div>
-                    <div>
-                      <span style={{ fontSize: '10px', fontWeight: '700', padding: '3px 8px', borderRadius: '20px', background: ev.bg, color: ev.text, display: 'inline-block', whiteSpace: 'nowrap' }}>
-                        {ev.label}
-                      </span>
+          </div>
+          <div style={{ padding: '8px 20px', borderBottom: '1px solid #F1F5F9', fontSize: '11px', color: '#94A3B8', background: '#FAFAFA' }}>
+            {filtered.length} events {filter !== 'ALL' && `matching "${filter}"`}
+          </div>
+          {loading ? (
+            <div style={{ padding: '48px', textAlign: 'center', fontSize: '13px', color: '#94A3B8' }}>Loading…</div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: '48px', textAlign: 'center', fontSize: '13px', color: '#94A3B8' }}>No events match this filter</div>
+          ) : (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.9fr 1.3fr 2.2fr 1fr', gap: '8px', padding: '10px 20px', borderBottom: '1px solid #F1F5F9' }}>
+                {['User', 'Role', 'Event', 'Details', 'Time'].map(h => (
+                  <div key={h} style={{ fontSize: '10px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</div>
+                ))}
+              </div>
+              <div style={{ maxHeight: '520px', overflowY: 'auto' }}>
+                {filtered.map((entry, idx) => {
+                  const ev = EVENT_COLORS[entry.action] || { bg: '#F1F5F9', text: '#64748B', label: entry.action };
+                  return (
+                    <div key={entry.id} style={{
+                      display: 'grid', gridTemplateColumns: '1.4fr 0.9fr 1.3fr 2.2fr 1fr',
+                      gap: '8px', padding: '11px 20px', alignItems: 'center',
+                      borderBottom: idx < filtered.length - 1 ? '1px solid #F8FAFC' : 'none',
+                      background: entry.action === 'ACCESS_DENIED' ? '#FFF5F5' : 'transparent',
+                    }}>
+                      <div style={{ fontSize: '12px', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.user_email || 'System'}</div>
+                      <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.user_role || '—'}</div>
+                      <div>
+                        <span style={{ fontSize: '10px', fontWeight: '700', padding: '3px 8px', borderRadius: '20px', background: ev.bg, color: ev.text, display: 'inline-block', whiteSpace: 'nowrap' }}>
+                          {ev.label}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.details || '—'}</div>
+                      <div style={{ fontSize: '11px', color: '#94A3B8', whiteSpace: 'nowrap' }}>{fmtTime(entry.created_at)}</div>
                     </div>
-                    <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.details || '—'}</div>
-                    <div style={{ fontSize: '11px', color: '#94A3B8', whiteSpace: 'nowrap' }}>{fmtTime(log.created_at)}</div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Users & Departments section ── */}
+      {activeSection === 'users' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+
+          {/* Full users table — spans both columns */}
+          <div className="neu-raised" style={{ padding: '0', overflow: 'hidden', gridColumn: '1 / -1' }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid #F1F5F9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A' }}>All Users ({users.length})</div>
+              <button onClick={() => navigate('/admin')} className="neu-btn" style={{ fontSize: '12px', padding: '7px 14px' }}>Full Management →</button>
+            </div>
+            {loading ? (
+              <div style={{ padding: '48px', textAlign: 'center', fontSize: '13px', color: '#94A3B8' }}>Loading…</div>
+            ) : (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 1.2fr 1fr 0.8fr', gap: '8px', padding: '10px 20px', borderBottom: '1px solid #F1F5F9' }}>
+                  {['Name', 'Email', 'Role', 'Department', 'Status'].map(h => (
+                    <div key={h} style={{ fontSize: '10px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</div>
+                  ))}
+                </div>
+                <div style={{ maxHeight: '360px', overflowY: 'auto' }}>
+                  {users.map((u, idx) => {
+                    const initials = (u.full_name || u.email).split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+                    return (
+                      <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 1.2fr 1fr 0.8fr', gap: '8px', padding: '12px 20px', alignItems: 'center', borderBottom: idx < users.length - 1 ? '1px solid #F8FAFC' : 'none' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#EEF2FF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', color: '#6366F1', flexShrink: 0 }}>{initials}</div>
+                          <span style={{ fontSize: '12px', fontWeight: '600', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || '—'}</span>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+                        <div><span className="badge" style={{ fontSize: '10px' }}>{u.role}</span></div>
+                        <div style={{ fontSize: '12px', color: '#64748B' }}>{u.department || '—'}</div>
+                        <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: u.is_active ? '#DCFCE7' : '#FEE2E2', color: u.is_active ? '#16A34A' : '#DC2626', fontWeight: '600', display: 'inline-block' }}>
+                          {u.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Most active users */}
+          <div className="neu-raised" style={{ padding: '20px' }}>
+            <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A', marginBottom: '16px' }}>Most Active Users (7 days)</div>
+            {stats.top_users.length === 0 ? (
+              <div style={{ fontSize: '12px', color: '#94A3B8' }}>No activity data yet</div>
+            ) : (
+              stats.top_users.map((u, i) => (
+                <div key={u.user_email} style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: '700', color: '#94A3B8', minWidth: '18px' }}>{i + 1}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '12px', fontWeight: '600', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.user_email}</div>
+                    <div style={{ fontSize: '11px', color: '#94A3B8' }}>{u.user_role}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '14px', fontWeight: '700', color: '#6366F1' }}>{u.event_count}</div>
+                    <div style={{ fontSize: '10px', color: '#94A3B8' }}>events</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* All-time action breakdown */}
+          <div className="neu-raised" style={{ padding: '20px' }}>
+            <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A', marginBottom: '16px' }}>All-Time Action Breakdown</div>
+            {stats.action_counts.length === 0 ? (
+              <div style={{ fontSize: '12px', color: '#94A3B8' }}>No data yet</div>
+            ) : (
+              stats.action_counts.slice(0, 8).map(ac => {
+                const ev = EVENT_COLORS[ac.action] || { bg: '#F1F5F9', text: '#64748B', label: ac.action };
+                const maxCount = stats.action_counts[0]?.count || 1;
+                return (
+                  <div key={ac.action} style={{ marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+                      <span style={{ fontSize: '11px', color: ev.text, fontWeight: '600' }}>{ev.label || ac.action}</span>
+                      <span style={{ fontSize: '11px', fontWeight: '700', color: '#0F172A' }}>{ac.count}</span>
+                    </div>
+                    <div style={{ height: '5px', borderRadius: '3px', background: '#F1F5F9', overflow: 'hidden' }}>
+                      <div style={{ width: `${(ac.count / maxCount) * 100}%`, height: '100%', background: ev.text, borderRadius: '3px' }}/>
+                    </div>
                   </div>
                 );
-              })}
-            </div>
+              })
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -295,20 +683,20 @@ const UserDashboard = () => {
   const [activeTab, setActiveTab] = useState('12 Months');
   const [storage, setStorage] = useState({ used_bytes: 0, shared_bytes: 0, total_bytes: 10 * 1024 * 1024 * 1024 });
 
-useEffect(() => {
-  const fetch = async () => {
-    try {
-      const [filesRes, storageRes] = await Promise.all([
-        api.get('/files'),
-        api.get('/files/storage'),
-      ]);
-      setFiles(filesRes.data.files || []);
-      setStorage(storageRes.data);
-    } catch { setError('Failed to load data'); }
-    finally { setLoading(false); }
-  };
-  fetch();
-}, []);
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const [filesRes, storageRes] = await Promise.all([
+          api.get('/files'),
+          api.get('/files/storage'),
+        ]);
+        setFiles(filesRes.data.files || []);
+        setStorage(storageRes.data);
+      } catch { setError('Failed to load data'); }
+      finally { setLoading(false); }
+    };
+    fetch();
+  }, []);
 
   const counts = { documents: 0, images: 0, videos: 0, others: 0 };
   const sizes  = { documents: 0, images: 0, videos: 0, others: 0 };
@@ -318,7 +706,6 @@ useEffect(() => {
     sizes[c] += f.size_bytes || 0;
   });
 
-  const totalSize   = files.reduce((s, f) => s + (f.size_bytes || 0), 0);
   const recentFiles = [...files].sort((a, b) => new Date(b.uploaded_at || 0) - new Date(a.uploaded_at || 0)).slice(0, 5);
 
   const handleDownload = async (fileId, fileName) => {
@@ -362,8 +749,6 @@ useEffect(() => {
             Using <strong style={{ color: '#0F172A' }}>{fmt(storage.used_bytes)}</strong> of {fmt(storage.total_bytes)}
           </div>
         </div>
-
-        {/* Bar: own files | shared | unused */}
         {(() => {
           const ownPct    = (storage.used_bytes - storage.shared_bytes) / storage.total_bytes * 100;
           const sharedPct = storage.shared_bytes / storage.total_bytes * 100;
@@ -376,7 +761,6 @@ useEffect(() => {
             </div>
           );
         })()}
-
         <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
           {[
             { dot: '#6366F1', label: `My files (${fmt(storage.used_bytes - storage.shared_bytes)})` },

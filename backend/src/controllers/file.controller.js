@@ -9,11 +9,36 @@ const { uploadFile, downloadFile, deleteFile } = require('../utils/minio');
 const { log, ACTIONS } = require('../utils/auditLog');
 
 const DEPARTMENTS = ['IT', 'Finance', 'Marketing', 'HR', 'Operations'];
+const QUOTA_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB per user
 
 const upload = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: 'No file provided' });
+    }
+
+    // Enforce storage quota before processing
+    const quotaResult = await pool.query(
+      `SELECT COALESCE(SUM(size_bytes), 0)::bigint AS used_bytes FROM files WHERE owner_id = $1 AND is_deleted = FALSE`,
+      [req.user.id]
+    );
+    const usedBytes = Number(quotaResult.rows[0].used_bytes);
+    if (usedBytes + req.file.size > QUOTA_BYTES) {
+      await log(
+        req.user.id, req.user.email, req.user.role,
+        ACTIONS.ACCESS_DENIED, 'files', null,
+        `Upload blocked — quota exceeded: used ${usedBytes} bytes, file ${req.file.size} bytes, limit ${QUOTA_BYTES} bytes`,
+        req.ip
+      );
+      return res.status(413).json({
+        message: 'Storage quota exceeded. You have used ' +
+          (usedBytes / 1073741824).toFixed(2) + ' GB of your 10 GB limit. ' +
+          'Free up space by deleting files before uploading.',
+        quota_exceeded: true,
+        used_bytes: usedBytes,
+        total_bytes: QUOTA_BYTES,
+        file_size: req.file.size,
+      });
     }
 
     const {
@@ -530,7 +555,7 @@ const shareFile = async (req, res) => {
 
 const getStorageStats = async (req, res) => {
   try {
-    const TOTAL_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB per user
+    const TOTAL_BYTES = QUOTA_BYTES;
 
     const result = await pool.query(
       `SELECT

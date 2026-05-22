@@ -395,14 +395,7 @@ const Layout = () => {
           </div>
 
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <button style={{
-              display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
-              background: 'none', border: '1.5px solid #E2E8F0', borderRadius: '8px',
-              color: '#475569', fontSize: '13px', fontWeight: '500', cursor: 'pointer',
-            }}>
-              <IconInvite />
-              Invite Members
-            </button>
+         
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '13px', fontWeight: '600', color: '#0F172A', whiteSpace: 'nowrap' }}>{user?.full_name}</div>

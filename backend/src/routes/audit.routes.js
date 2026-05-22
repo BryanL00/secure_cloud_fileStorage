@@ -46,6 +46,73 @@ function buildCSV(rows) {
   return lines.join('\r\n');
 }
 
+// GET /api/audit/security — recent events for admin dashboard
+router.get(
+  '/security',
+  authenticate,
+  authorize('Administrator'),
+  async (req, res) => {
+    try {
+      const { limit = 100 } = req.query;
+      const safeLimit = Math.min(Math.max(parseInt(limit) || 100, 1), 500);
+      const result = await pool.query(
+        `SELECT id, user_email, user_role, action,
+                resource, resource_id, details, ip_address, created_at
+         FROM audit_logs
+         ORDER BY created_at DESC
+         LIMIT $1`,
+        [safeLimit]
+      );
+      res.json({ logs: result.rows });
+    } catch (error) {
+      res.status(500).json({ message: 'Failed to fetch security logs' });
+    }
+  }
+);
+
+// GET /api/audit/stats — aggregated statistics for admin dashboard
+router.get(
+  '/stats',
+  authenticate,
+  authorize('Administrator'),
+  async (req, res) => {
+    try {
+      const [actionsResult, dailyResult, topUsersResult] = await Promise.all([
+        pool.query(`
+          SELECT action, COUNT(*)::int AS count
+          FROM audit_logs
+          GROUP BY action
+          ORDER BY count DESC
+        `),
+        pool.query(`
+          SELECT DATE(created_at)::text AS day, COUNT(*)::int AS count
+          FROM audit_logs
+          WHERE created_at >= NOW() - INTERVAL '14 days'
+          GROUP BY DATE(created_at)
+          ORDER BY day ASC
+        `),
+        pool.query(`
+          SELECT user_email, user_role, COUNT(*)::int AS event_count
+          FROM audit_logs
+          WHERE created_at >= NOW() - INTERVAL '7 days'
+            AND user_email IS NOT NULL
+          GROUP BY user_email, user_role
+          ORDER BY event_count DESC
+          LIMIT 5
+        `),
+      ]);
+
+      res.json({
+        action_counts: actionsResult.rows,
+        daily_counts: dailyResult.rows,
+        top_users: topUsersResult.rows,
+      });
+    } catch (error) {
+      res.status(500).json({ message: 'Failed to fetch audit stats' });
+    }
+  }
+);
+
 // GET /api/audit — paginated log view with optional filters
 router.get(
   '/',
