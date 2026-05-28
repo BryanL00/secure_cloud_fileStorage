@@ -159,7 +159,7 @@ const SharedFiles = () => {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#F8FAFC' }}>
-                  {['File Name', 'Shared By', 'Department', 'Sensitivity', 'Size', 'Shared On', ''].map(h => (
+                  {['File Name', 'Shared By', 'Department', 'Sensitivity', 'Permission', 'Size', 'Shared On', ''].map(h => (
                     <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #E2E8F0' }}>{h}</th>
                   ))}
                 </tr>
@@ -189,17 +189,27 @@ const SharedFiles = () => {
                         : <span style={{ color: '#CBD5E1', fontSize: '13px' }}>—</span>}
                     </td>
                     <td style={{ padding: '14px 16px' }}><SensitivityBadge level={file.sensitivity_level} /></td>
+                    <td style={{ padding: '14px 16px' }}>
+                      {file.permission_level === 'viewer'
+                        ? <span style={{ padding: '2px 8px', borderRadius: '999px', fontSize: '11px', fontWeight: '600', background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #BFDBFE' }}>Viewer</span>
+                        : <span style={{ padding: '2px 8px', borderRadius: '999px', fontSize: '11px', fontWeight: '600', background: '#F8FAFC', color: '#64748B', border: '1px solid #E2E8F0' }}>Metadata only</span>
+                      }
+                    </td>
                     <td style={{ padding: '14px 16px', fontSize: '13px', color: '#64748B' }}>{fmtSize(file.file_size || file.size_bytes)}</td>
                     <td style={{ padding: '14px 16px', fontSize: '13px', color: '#64748B' }}>{fmtDate(file.shared_at || file.uploaded_at)}</td>
                     <td style={{ padding: '14px 16px' }}>
-                      <button onClick={() => handleDownload(file)} disabled={downloading === file.id} style={{
-                        padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '600',
-                        background: downloading === file.id ? '#E2E8F0' : '#22C55E',
-                        color: downloading === file.id ? '#94A3B8' : '#fff',
-                        border: 'none', cursor: downloading === file.id ? 'not-allowed' : 'pointer',
-                      }}>
-                        {downloading === file.id ? 'Downloading…' : 'Download'}
-                      </button>
+                      {file.permission_level === 'viewer' ? (
+                        <button onClick={() => handleDownload(file)} disabled={downloading === file.id} style={{
+                          padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '600',
+                          background: downloading === file.id ? '#E2E8F0' : '#22C55E',
+                          color: downloading === file.id ? '#94A3B8' : '#fff',
+                          border: 'none', cursor: downloading === file.id ? 'not-allowed' : 'pointer',
+                        }}>
+                          {downloading === file.id ? 'Downloading…' : 'Download'}
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '12px', color: '#94A3B8', fontStyle: 'italic' }}>View only</span>
+                      )}
                     </td>
                   </tr>
                 ))}

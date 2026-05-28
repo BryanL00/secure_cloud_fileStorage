@@ -152,7 +152,7 @@ const download = async (req, res) => {
 
     if (!isOwner) {
       const permResult = await pool.query(
-        `SELECT id FROM file_permissions
+        `SELECT permission_level FROM file_permissions
          WHERE file_id = $1 AND granted_to_user_id = $2`,
         [id, req.user.id]
       );
@@ -165,6 +165,18 @@ const download = async (req, res) => {
           req.ip
         );
         return res.status(403).json({ message: 'Access denied' });
+      }
+
+      if (permResult.rows[0].permission_level !== 'viewer') {
+        await log(
+          req.user.id, req.user.email, req.user.role,
+          ACTIONS.ACCESS_DENIED, 'files', id,
+          `Download blocked — permission_level is '${permResult.rows[0].permission_level}', requires 'viewer'`,
+          req.ip
+        );
+        return res.status(403).json({
+          message: 'You have metadata-only access to this file and cannot download it'
+        });
       }
     }
 
@@ -481,6 +493,13 @@ const shareFile = async (req, res) => {
   try {
     const { id } = req.params;
     const { granted_to_email, permission_level = 'viewer' } = req.body;
+
+    const VALID_PERMISSION_LEVELS = ['viewer', 'metadata'];
+    if (!VALID_PERMISSION_LEVELS.includes(permission_level)) {
+      return res.status(400).json({
+        message: `Invalid permission level. Must be one of: ${VALID_PERMISSION_LEVELS.join(', ')}`
+      });
+    }
 
     if (!['Department Manager', 'Project Manager'].includes(req.user.role)) {
       return res.status(403).json({ message: 'Only Managers can share files' });

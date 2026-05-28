@@ -18,9 +18,10 @@ const MyFiles = () => {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [deleting, setDeleting]         = useState(false);
   const [uploadForm, setUploadForm]     = useState({ file: null, sensitivity_level: 'low', project_category: '', department: '' });
-  const [shareModal, setShareModal]     = useState(null);
-  const [shareEmail, setShareEmail]     = useState('');
-  const [sharing, setSharing]           = useState(false);
+  const [shareModal, setShareModal]         = useState(null);
+  const [shareEmail, setShareEmail]         = useState('');
+  const [sharePermission, setSharePermission] = useState('viewer');
+  const [sharing, setSharing]               = useState(false);
   const canUpload = ['Department Manager', 'Project Manager', 'User'].includes(user?.role);
   const canDelete = ['Department Manager', 'Project Manager', 'User'].includes(user?.role);
   const canShare  = ['Department Manager', 'Project Manager'].includes(user?.role);
@@ -121,9 +122,9 @@ const MyFiles = () => {
   if (!shareEmail.trim() || !shareModal) return;
   setSharing(true); setError(''); setSuccess('');
   try {
-    await api.post(`/files/${shareModal.id}/share`, { granted_to_email: shareEmail.trim() });
+    await api.post(`/files/${shareModal.id}/share`, { granted_to_email: shareEmail.trim(), permission_level: sharePermission });
     setSuccess(`File shared with ${shareEmail.trim()}`);
-    setShareModal(null); setShareEmail('');
+    setShareModal(null); setShareEmail(''); setSharePermission('viewer');
   } catch (err) { setError(err.response?.data?.message || 'Share failed'); }
   finally { setSharing(false); }
 };
@@ -185,8 +186,13 @@ const MyFiles = () => {
             <form onSubmit={handleShare}>
               <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>Recipient email (User or Guest only)</label>
               <input className="neu-input" type="email" placeholder="user@example.com" value={shareEmail} onChange={e => setShareEmail(e.target.value)} autoFocus required style={{ width: '100%', marginBottom: '16px', boxSizing: 'border-box' }} />
+              <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>Permission level</label>
+              <select value={sharePermission} onChange={e => setSharePermission(e.target.value)} className="neu-input" style={{ width: '100%', marginBottom: '16px', boxSizing: 'border-box' }}>
+                <option value="viewer">Viewer — can view and download the file</option>
+                <option value="metadata">Metadata only — can see file info but not download</option>
+              </select>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                <button type="button" className="neu-btn" onClick={() => { setShareModal(null); setShareEmail(''); }}>Cancel</button>
+                <button type="button" className="neu-btn" onClick={() => { setShareModal(null); setShareEmail(''); setSharePermission('viewer'); }}>Cancel</button>
                 <button type="submit" className="neu-btn-primary" disabled={sharing}>{sharing ? 'Sharing…' : 'Share'}</button>
               </div>
             </form>
