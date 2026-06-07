@@ -38,6 +38,9 @@ const SharedFiles = () => {
   const [downloading, setDownloading] = useState(null);
   const [filterDept, setFilterDept]   = useState('');
   const [filterSens, setFilterSens]   = useState('');
+  const [previewFile, setPreviewFile] = useState(null);
+  const [previewUrl, setPreviewUrl]   = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => { fetchSharedFiles(); }, []);
 
@@ -49,6 +52,20 @@ const SharedFiles = () => {
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to load shared files');
     } finally { setLoading(false); }
+  };
+
+  const handlePreview = async (file) => {
+    setPreviewFile(file); setPreviewUrl(null); setPreviewLoading(true);
+    try {
+      const res = await api.get(`/files/download/${file.id}`, { responseType: 'blob' });
+      setPreviewUrl(URL.createObjectURL(new Blob([res.data], { type: file.mime_type || 'application/octet-stream' })));
+    } catch { setPreviewFile(null); alert('Preview failed'); }
+    finally { setPreviewLoading(false); }
+  };
+
+  const closePreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewFile(null); setPreviewUrl(null);
   };
 
   const handleDownload = async (file) => {
@@ -75,6 +92,38 @@ const SharedFiles = () => {
 
   return (
     <div style={{ padding: '32px', maxWidth: '1100px' }}>
+    {/* Preview modal */}
+    {previewFile && (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
+        <div style={{ width: '90vw', maxWidth: '960px', height: '88vh', background: '#fff', borderRadius: '16px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.3)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #F1F5F9', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="#64748B"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+              <span style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A' }}>{previewFile.original_name}</span>
+            </div>
+            <button onClick={closePreview} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B', padding: '4px', display: 'flex' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+          </div>
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC' }}>
+            {previewLoading && <div style={{ color: '#64748B', fontSize: '14px' }}>Loading preview…</div>}
+            {!previewLoading && previewUrl && (() => {
+              const mime = previewFile.mime_type || '';
+              if (mime === 'application/pdf') return <iframe src={previewUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="preview" />;
+              if (mime.startsWith('image/')) return <img src={previewUrl} alt={previewFile.original_name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />;
+              if (mime.startsWith('text/') || mime === 'application/json') return <iframe src={previewUrl} style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }} title="preview" />;
+              return (
+                <div style={{ textAlign: 'center', color: '#64748B' }}>
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="#CBD5E1" style={{ marginBottom: '12px' }}><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>Preview not available</div>
+                  <div style={{ fontSize: '13px' }}>This file type cannot be previewed in the browser.</div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      </div>
+    )}
       {/* Header */}
       <div style={{ marginBottom: '28px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '6px' }}>
@@ -198,18 +247,23 @@ const SharedFiles = () => {
                     <td style={{ padding: '14px 16px', fontSize: '13px', color: '#64748B' }}>{fmtSize(file.file_size || file.size_bytes)}</td>
                     <td style={{ padding: '14px 16px', fontSize: '13px', color: '#64748B' }}>{fmtDate(file.shared_at || file.uploaded_at)}</td>
                     <td style={{ padding: '14px 16px' }}>
-                      {file.permission_level === 'viewer' ? (
-                        <button onClick={() => handleDownload(file)} disabled={downloading === file.id} style={{
-                          padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '600',
-                          background: downloading === file.id ? '#E2E8F0' : '#22C55E',
-                          color: downloading === file.id ? '#94A3B8' : '#fff',
-                          border: 'none', cursor: downloading === file.id ? 'not-allowed' : 'pointer',
-                        }}>
-                          {downloading === file.id ? 'Downloading…' : 'Download'}
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <button onClick={() => handlePreview(file)} style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', background: '#F8FAFC', color: '#374151', border: '1px solid #E2E8F0', cursor: 'pointer' }}>
+                          Preview
                         </button>
-                      ) : (
-                        <span style={{ fontSize: '12px', color: '#94A3B8', fontStyle: 'italic' }}>View only</span>
-                      )}
+                        {file.permission_level === 'viewer' ? (
+                          <button onClick={() => handleDownload(file)} disabled={downloading === file.id} style={{
+                            padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '600',
+                            background: downloading === file.id ? '#E2E8F0' : '#22C55E',
+                            color: downloading === file.id ? '#94A3B8' : '#fff',
+                            border: 'none', cursor: downloading === file.id ? 'not-allowed' : 'pointer',
+                          }}>
+                            {downloading === file.id ? 'Downloading…' : 'Download'}
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: '12px', color: '#94A3B8', fontStyle: 'italic' }}>View only</span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

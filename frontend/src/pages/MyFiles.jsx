@@ -18,10 +18,16 @@ const MyFiles = () => {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [deleting, setDeleting]         = useState(false);
   const [uploadForm, setUploadForm]     = useState({ file: null, sensitivity_level: 'low', project_category: '', department: '' });
-  const [shareModal, setShareModal]         = useState(null);
-  const [shareEmail, setShareEmail]         = useState('');
+  const [shareModal, setShareModal]           = useState(null);
+  const [shareEmail, setShareEmail]           = useState('');
   const [sharePermission, setSharePermission] = useState('viewer');
-  const [sharing, setSharing]               = useState(false);
+  const [sharing, setSharing]                 = useState(false);
+  const [fileShares, setFileShares]           = useState([]);
+  const [fileOwner, setFileOwner]             = useState(null);
+  const [sharesLoading, setSharesLoading]     = useState(false);
+  const [previewFile, setPreviewFile]         = useState(null);
+  const [previewUrl, setPreviewUrl]           = useState(null);
+  const [previewLoading, setPreviewLoading]   = useState(false);
   const canUpload = ['Department Manager', 'Project Manager', 'User'].includes(user?.role);
   const canDelete = ['Department Manager', 'Project Manager', 'User'].includes(user?.role);
   const canShare  = ['Department Manager', 'Project Manager'].includes(user?.role);
@@ -117,14 +123,59 @@ const MyFiles = () => {
     } catch { setError('Download failed'); }
   };
 
+  useEffect(() => {
+    if (!shareModal) return;
+    const fetchShareData = async () => {
+      setSharesLoading(true);
+      try {
+        const sharesRes = await api.get(`/files/${shareModal.id}/shares`);
+        setFileShares(sharesRes.data.shares || []);
+        setFileOwner(sharesRes.data.owner);
+      } catch { /* silently ignore */ }
+      finally { setSharesLoading(false); }
+    };
+    fetchShareData();
+  }, [shareModal]);
+
+  const closeShareModal = () => {
+    setShareModal(null); setShareEmail(''); setSharePermission('viewer');
+    setFileShares([]); setFileOwner(null);
+    setError(''); setSuccess('');
+  };
+
+  const handleRevokeShare = async (userId) => {
+    if (!shareModal) return;
+    try {
+      await api.delete(`/files/${shareModal.id}/share/${userId}`);
+      const sharesRes = await api.get(`/files/${shareModal.id}/shares`);
+      setFileShares(sharesRes.data.shares || []);
+    } catch (err) { setError(err.response?.data?.message || 'Failed to revoke access'); }
+  };
+
+  const handlePreview = async (file) => {
+    setPreviewFile(file); setPreviewUrl(null); setPreviewLoading(true);
+    try {
+      const res = await api.get(`/files/download/${file.id}`, { responseType: 'blob' });
+      setPreviewUrl(URL.createObjectURL(new Blob([res.data], { type: file.mime_type || 'application/octet-stream' })));
+    } catch { setPreviewFile(null); alert('Preview failed'); }
+    finally { setPreviewLoading(false); }
+  };
+
+  const closePreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewFile(null); setPreviewUrl(null);
+  };
+
   const handleShare = async (e) => {
   e.preventDefault();
   if (!shareEmail.trim() || !shareModal) return;
   setSharing(true); setError(''); setSuccess('');
   try {
     await api.post(`/files/${shareModal.id}/share`, { granted_to_email: shareEmail.trim(), permission_level: sharePermission });
-    setSuccess(`File shared with ${shareEmail.trim()}`);
-    setShareModal(null); setShareEmail(''); setSharePermission('viewer');
+    setSuccess(`Shared with ${shareEmail.trim()}`);
+    setShareEmail(''); setSharePermission('viewer');
+    const sharesRes = await api.get(`/files/${shareModal.id}/shares`);
+    setFileShares(sharesRes.data.shares || []);
   } catch (err) { setError(err.response?.data?.message || 'Share failed'); }
   finally { setSharing(false); }
 };
@@ -171,6 +222,12 @@ const MyFiles = () => {
   const currentFolderName = currentFolderData?.name;
   const visibleFolders    = folders.filter(f => String(f.parent_id || '') === String(currentFolder || ''));
   const visibleFiles      = files.filter(f => String(f.folder_id || '') === String(currentFolder || ''));
+
+  const countFilesInFolder = (folderId) => {
+    const direct = files.filter(f => String(f.folder_id) === String(folderId)).length;
+    const subs   = folders.filter(f => String(f.parent_id) === String(folderId));
+    return direct + subs.reduce((sum, sf) => sum + countFilesInFolder(sf.id), 0);
+  };
   const allSelected       = visibleFiles.length > 0 && selectedFiles.length === visibleFiles.length;
   const someSelected      = selectedFiles.length > 0;
   const fieldStyle        = { flex: '1', minWidth: '120px' };
@@ -178,27 +235,136 @@ const MyFiles = () => {
   return (
     
     <div>
-    {shareModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="neu-raised" style={{ padding: '28px', width: '400px', borderRadius: '16px', background: '#fff' }}>
-            <div style={{ fontSize: '16px', fontWeight: '700', color: '#0F172A', marginBottom: '4px' }}>Share File</div>
-            <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '20px' }}>{shareModal.original_name}</div>
-            <form onSubmit={handleShare}>
-              <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>Recipient email (User or Guest only)</label>
-              <input className="neu-input" type="email" placeholder="user@example.com" value={shareEmail} onChange={e => setShareEmail(e.target.value)} autoFocus required style={{ width: '100%', marginBottom: '16px', boxSizing: 'border-box' }} />
-              <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>Permission level</label>
-              <select value={sharePermission} onChange={e => setSharePermission(e.target.value)} className="neu-input" style={{ width: '100%', marginBottom: '16px', boxSizing: 'border-box' }}>
-                <option value="viewer">Viewer — can view and download the file</option>
-                <option value="metadata">Metadata only — can see file info but not download</option>
-              </select>
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                <button type="button" className="neu-btn" onClick={() => { setShareModal(null); setShareEmail(''); setSharePermission('viewer'); }}>Cancel</button>
-                <button type="submit" className="neu-btn-primary" disabled={sharing}>{sharing ? 'Sharing…' : 'Share'}</button>
-              </div>
-            </form>
+    {/* Preview modal */}
+    {previewFile && (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
+        <div style={{ width: '90vw', maxWidth: '960px', height: '88vh', background: '#fff', borderRadius: '16px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.3)' }}>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #F1F5F9', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="#64748B"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+              <span style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A' }}>{previewFile.original_name}</span>
+            </div>
+            <button onClick={closePreview} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B', padding: '4px', display: 'flex' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+          </div>
+          {/* Content */}
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC' }}>
+            {previewLoading && <div style={{ color: '#64748B', fontSize: '14px' }}>Loading preview…</div>}
+            {!previewLoading && previewUrl && (() => {
+              const mime = previewFile.mime_type || '';
+              if (mime === 'application/pdf') {
+                return <iframe src={previewUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="preview" />;
+              }
+              if (mime.startsWith('image/')) {
+                return <img src={previewUrl} alt={previewFile.original_name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />;
+              }
+              if (mime.startsWith('text/') || mime === 'application/json') {
+                return (
+                  <iframe src={previewUrl} style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }} title="preview" />
+                );
+              }
+              return (
+                <div style={{ textAlign: 'center', color: '#64748B' }}>
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="#CBD5E1" style={{ marginBottom: '12px' }}><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>Preview not available</div>
+                  <div style={{ fontSize: '13px', marginBottom: '16px' }}>This file type cannot be previewed in the browser.</div>
+                  <button className="neu-btn-primary" style={{ padding: '8px 20px', fontSize: '13px' }} onClick={() => { closePreview(); handleDownload(previewFile.id, previewFile.original_name); }}>Download instead</button>
+                </div>
+              );
+            })()}
           </div>
         </div>
-      )}
+      </div>
+    )}
+    {shareModal && (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+        <div style={{ width: '480px', maxHeight: '85vh', overflowY: 'auto', background: '#fff', borderRadius: '16px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+
+          {/* Header */}
+          <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="#64748B"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+              <div>
+                <div style={{ fontSize: '15px', fontWeight: '700', color: '#0F172A' }}>Share file</div>
+                <div style={{ fontSize: '12px', color: '#64748B' }}>{shareModal.original_name}</div>
+              </div>
+            </div>
+            <button onClick={closeShareModal} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', padding: '4px', display: 'flex', alignItems: 'center' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+          </div>
+
+          {/* Add people */}
+          <div style={{ padding: '16px 24px' }}>
+            <div style={{ fontSize: '12px', fontWeight: '600', color: '#374151', marginBottom: '10px' }}>Add people</div>
+            <form onSubmit={handleShare} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input className="neu-input" type="email" placeholder="user@example.com" value={shareEmail} onChange={e => setShareEmail(e.target.value)} autoFocus style={{ flex: 1, padding: '9px 12px', fontSize: '13px', boxSizing: 'border-box' }} />
+              <select value={sharePermission} onChange={e => setSharePermission(e.target.value)} style={{ padding: '9px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', fontSize: '12px', color: '#374151', background: '#fff', cursor: 'pointer', flexShrink: 0 }}>
+                <option value="viewer">Can download</option>
+                <option value="metadata">View only</option>
+              </select>
+              <button type="submit" disabled={sharing || !shareEmail.trim()} style={{ padding: '9px 16px', borderRadius: '8px', background: '#22C55E', color: '#fff', border: 'none', fontSize: '13px', fontWeight: '600', cursor: sharing || !shareEmail.trim() ? 'not-allowed' : 'pointer', opacity: sharing || !shareEmail.trim() ? 0.6 : 1, flexShrink: 0 }}>
+                {sharing ? '…' : 'Add'}
+              </button>
+            </form>
+            {error   && <div style={{ fontSize: '12px', color: '#E11D48', marginTop: '8px' }}>{error}</div>}
+            {success && <div style={{ fontSize: '12px', color: '#16A34A', marginTop: '8px' }}>{success}</div>}
+          </div>
+
+          {/* Who has access */}
+          <div style={{ borderTop: '1px solid #F1F5F9' }}>
+            <div style={{ padding: '12px 24px 8px', fontSize: '12px', fontWeight: '600', color: '#374151' }}>Who has access</div>
+            {sharesLoading ? (
+              <div style={{ padding: '12px 24px', fontSize: '13px', color: '#94A3B8' }}>Loading…</div>
+            ) : (
+              <div style={{ paddingBottom: '8px' }}>
+                {fileOwner && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 24px' }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#22C55E', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '13px', fontWeight: '700', flexShrink: 0 }}>
+                      {(fileOwner.full_name?.[0] || fileOwner.email?.[0] || '?').toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', fontWeight: '500', color: '#0F172A' }}>{fileOwner.full_name} (you)</div>
+                      <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileOwner.email}</div>
+                    </div>
+                    <span style={{ fontSize: '11px', color: '#64748B', flexShrink: 0 }}>Owner</span>
+                  </div>
+                )}
+                {fileShares.map(share => (
+                  <div key={share.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 24px' }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563EB', fontSize: '13px', fontWeight: '700', flexShrink: 0 }}>
+                      {(share.full_name?.[0] || share.email?.[0] || '?').toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', fontWeight: '500', color: '#0F172A' }}>{share.full_name}</div>
+                      <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{share.email}</div>
+                    </div>
+                    <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '999px', fontWeight: '600', flexShrink: 0, background: share.permission_level === 'viewer' ? '#EFF6FF' : '#F8FAFC', color: share.permission_level === 'viewer' ? '#2563EB' : '#64748B', border: `1px solid ${share.permission_level === 'viewer' ? '#BFDBFE' : '#E2E8F0'}` }}>
+                      {share.permission_level === 'viewer' ? 'Can download' : 'View only'}
+                    </span>
+                    <button onClick={() => handleRevokeShare(share.id)} title="Revoke access" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', padding: '4px', display: 'flex', alignItems: 'center', flexShrink: 0 }}
+                      onMouseEnter={e => e.currentTarget.style.color = '#E11D48'}
+                      onMouseLeave={e => e.currentTarget.style.color = '#94A3B8'}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                    </button>
+                  </div>
+                ))}
+                {fileShares.length === 0 && (
+                  <div style={{ padding: '4px 24px 8px', fontSize: '13px', color: '#94A3B8' }}>Not shared with anyone yet.</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div style={{ padding: '12px 24px 20px', borderTop: '1px solid #F1F5F9', display: 'flex', justifyContent: 'flex-end' }}>
+            <button onClick={closeShareModal} style={{ padding: '9px 24px', borderRadius: '8px', background: '#F8FAFC', color: '#374151', border: '1px solid #E2E8F0', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>Done</button>
+          </div>
+        </div>
+      </div>
+    )}
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <div>
@@ -332,7 +498,7 @@ const MyFiles = () => {
                       <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
                     </svg>
                     <div style={{ fontSize: '12px', fontWeight: '600', color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folder.name}</div>
-                    <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '3px' }}>{files.filter(f => String(f.folder_id) === String(folder.id)).length} files</div>
+                    <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '3px' }}>{countFilesInFolder(folder.id)} files</div>
                     {canDelete && (
                       <button className="neu-btn" onClick={e => { e.stopPropagation(); handleDeleteFolder(folder.id); }} style={{ position: 'absolute', top: '8px', right: '8px', padding: '2px 7px', fontSize: '13px', color: '#DC2626', border: 'none', background: 'transparent' }}>×</button>
                     )}
@@ -347,7 +513,7 @@ const MyFiles = () => {
             <div>
               <div style={{ fontSize: '11px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>Files</div>
               <div className="neu-raised" style={{ padding: '0', overflow: 'hidden' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: canDelete ? '36px 2fr 1fr 1fr 1fr 1fr 1.2fr' : '2fr 1fr 1fr 1fr 1fr 1.2fr', gap: '8px', padding: '12px 20px', borderBottom: '1px solid #F1F5F9', alignItems: 'center' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: canDelete ? '36px 2fr 1fr 1fr 1fr 1fr 1.8fr' : '2fr 1fr 1fr 1fr 1fr 1.8fr', gap: '8px', padding: '12px 20px', borderBottom: '1px solid #F1F5F9', alignItems: 'center' }}>
                   {canDelete && (
                     <div style={{ width: '18px', height: '18px', borderRadius: '5px', border: '1.5px solid #CBD5E1', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: allSelected ? '#22C55E' : 'transparent', flexShrink: 0 }} onClick={toggleSelectAll}>
                       {allSelected && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
@@ -363,7 +529,7 @@ const MyFiles = () => {
                     const isOwner       = file.owner_email === user?.email;
                     const canDeleteThis = canDelete && isOwner;
                     return (
-                      <div key={file.id} style={{ display: 'grid', gridTemplateColumns: canDelete ? '36px 2fr 1fr 1fr 1fr 1fr 1.2fr' : '2fr 1fr 1fr 1fr 1fr 1.2fr', gap: '8px', padding: '14px 20px', alignItems: 'center', borderBottom: idx < visibleFiles.length - 1 ? '1px solid #F8FAFC' : 'none', background: isSelected ? '#F0FDF4' : 'transparent', transition: 'background 0.15s' }}>
+                      <div key={file.id} style={{ display: 'grid', gridTemplateColumns: canDelete ? '36px 2fr 1fr 1fr 1fr 1fr 1.8fr' : '2fr 1fr 1fr 1fr 1fr 1.8fr', gap: '8px', padding: '14px 20px', alignItems: 'center', borderBottom: idx < visibleFiles.length - 1 ? '1px solid #F8FAFC' : 'none', background: isSelected ? '#F0FDF4' : 'transparent', transition: 'background 0.15s' }}>
                         {canDelete && (
                           <div style={{ width: '18px', height: '18px', borderRadius: '5px', border: `1.5px solid ${isSelected ? '#22C55E' : '#CBD5E1'}`, cursor: canDeleteThis ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isSelected ? '#22C55E' : 'transparent', opacity: canDeleteThis ? 1 : 0.3, flexShrink: 0 }} onClick={() => canDeleteThis && toggleFileSelect(file.id)}>
                             {isSelected && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
@@ -379,13 +545,14 @@ const MyFiles = () => {
                         <div style={{ fontSize: '12px', color: '#64748B' }}>{file.department || '—'}</div>
                         <div style={{ fontSize: '12px', color: '#64748B' }}>{file.project_category || '—'}</div>
                         <div style={{ fontSize: '12px', color: '#64748B' }}>{formatSize(file.size_bytes)}</div>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button className="neu-btn" style={{ padding: '5px 10px', fontSize: '11px' }} onClick={() => handleDownload(file.id, file.original_name)}>Download</button>
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap' }}>
+                          <button className="neu-btn" style={{ padding: '5px 8px', fontSize: '11px', whiteSpace: 'nowrap' }} onClick={() => handlePreview(file)}>Preview</button>
+                          <button className="neu-btn" style={{ padding: '5px 8px', fontSize: '11px', whiteSpace: 'nowrap' }} onClick={() => handleDownload(file.id, file.original_name)}>Download</button>
                           {canShare && isOwner && (
-                            <button className="neu-btn" style={{ padding: '5px 10px', fontSize: '11px', color: '#2563EB' }} onClick={() => { setShareModal(file); setShareEmail(''); }}>Share</button>
+                            <button className="neu-btn" style={{ padding: '5px 8px', fontSize: '11px', whiteSpace: 'nowrap', color: '#2563EB' }} onClick={() => { setShareModal(file); setShareEmail(''); }}>Share</button>
                           )}
                           {canDeleteThis && (
-                            <button className="neu-btn" style={{ padding: '5px 10px', fontSize: '11px', color: '#DC2626' }} onClick={() => handleSingleDelete(file.id)}>Delete</button>
+                            <button className="neu-btn" style={{ padding: '5px 8px', fontSize: '11px', whiteSpace: 'nowrap', color: '#DC2626' }} onClick={() => handleSingleDelete(file.id)}>Delete</button>
                           )}
                         </div>
                       </div>

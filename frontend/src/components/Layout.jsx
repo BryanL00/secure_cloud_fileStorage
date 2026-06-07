@@ -191,7 +191,7 @@ const Layout = () => {
 
   const mainNavItems = [
     { to: '/dashboard', label: 'Dashboard', icon: <IconDashboard /> },
-    ...(user?.role !== 'Administrator' ? [{ to: '/my-files', label: 'Files', icon: <IconFiles /> }] : []),
+    ...(user?.role !== 'Administrator' && user?.role !== 'Guest' ? [{ to: '/my-files', label: 'Files', icon: <IconFiles /> }] : []),
     ...(user?.role === 'Administrator' ? [{ to: '/admin', label: 'Admin Panel', icon: <IconAdmin /> }] : []),
   ];
 

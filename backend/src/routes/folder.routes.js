@@ -48,9 +48,15 @@ router.get(
           `SELECT f.*, u.email as owner_email
            FROM folders f
            JOIN users u ON f.owner_id = u.id
+           JOIN roles r ON u.role_id = r.id
            WHERE f.owner_id = $1
+              OR (
+                u.department = $2
+                AND $2 IS NOT NULL
+                AND r.name IN ('Department Manager', 'Project Manager')
+              )
            ORDER BY f.created_at DESC`,
-          [req.user.id]
+          [req.user.id, req.user.department]
         );
       }
       res.json({ folders: result.rows });
@@ -75,7 +81,25 @@ router.delete(
       if (folder.rows[0].owner_id !== req.user.id && req.user.role !== 'Administrator') {
         return res.status(403).json({ message: 'Access denied' });
       }
-      await pool.query('DELETE FROM folders WHERE id = $1', [id]);
+      await pool.query(
+        `WITH RECURSIVE subtree AS (
+           SELECT id FROM folders WHERE id = $1
+           UNION ALL
+           SELECT f.id FROM folders f JOIN subtree s ON f.parent_id = s.id
+         )
+         UPDATE files SET is_deleted = TRUE
+         WHERE folder_id IN (SELECT id FROM subtree) AND is_deleted = FALSE`,
+        [id]
+      );
+      await pool.query(
+        `WITH RECURSIVE subtree AS (
+           SELECT id FROM folders WHERE id = $1
+           UNION ALL
+           SELECT f.id FROM folders f JOIN subtree s ON f.parent_id = s.id
+         )
+         DELETE FROM folders WHERE id IN (SELECT id FROM subtree)`,
+        [id]
+      );
       res.json({ message: 'Folder deleted' });
     } catch (error) {
       res.status(500).json({ message: 'Failed to delete folder', error: error.message });

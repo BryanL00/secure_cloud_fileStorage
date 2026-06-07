@@ -544,10 +544,12 @@ const shareFile = async (req, res) => {
       });
     }
 
+    const isDepartmentManager = req.user.role === 'Department Manager';
+    const isGuest = targetUser.role === 'Guest';
     const managerDept = req.user.department;
     const sameDepartment = managerDept && targetUser.department === managerDept;
 
-    if (!sameDepartment) {
+    if (!isDepartmentManager && !isGuest && !sameDepartment) {
       return res.status(403).json({
         message: 'You can only share files with users in the same department'
       });
@@ -611,8 +613,57 @@ const getStorageStats = async (req, res) => {
   }
 };
 
+const getFileShares = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const fileResult = await pool.query('SELECT owner_id FROM files WHERE id = $1 AND is_deleted = FALSE', [id]);
+    if (fileResult.rows.length === 0) return res.status(404).json({ message: 'File not found' });
+    if (fileResult.rows[0].owner_id !== req.user.id) return res.status(403).json({ message: 'Access denied' });
+
+    const [sharesResult, ownerResult] = await Promise.all([
+      pool.query(
+        `SELECT u.id, u.email, u.full_name, fp.permission_level
+         FROM file_permissions fp JOIN users u ON u.id = fp.granted_to_user_id
+         WHERE fp.file_id = $1 ORDER BY fp.created_at DESC`, [id]
+      ),
+      pool.query('SELECT id, email, full_name FROM users WHERE id = $1', [req.user.id]),
+    ]);
+
+    res.json({ owner: ownerResult.rows[0], shares: sharesResult.rows });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch shares' });
+  }
+};
+
+const revokeShare = async (req, res) => {
+  try {
+    const { id, userId } = req.params;
+
+    const fileResult = await pool.query(
+      'SELECT owner_id, original_name FROM files WHERE id = $1 AND is_deleted = FALSE', [id]
+    );
+    if (fileResult.rows.length === 0) return res.status(404).json({ message: 'File not found' });
+    if (fileResult.rows[0].owner_id !== req.user.id) return res.status(403).json({ message: 'Only the file owner can revoke access' });
+
+    const targetResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+    if (targetResult.rows.length === 0) return res.status(404).json({ message: 'User not found' });
+
+    await pool.query(
+      'DELETE FROM file_permissions WHERE file_id = $1 AND granted_to_user_id = $2', [id, userId]
+    );
+
+    await log(req.user.id, req.user.email, req.user.role, ACTIONS.FILE_SHARE, 'files', id,
+      `Revoked access for ${targetResult.rows[0].email} on: ${fileResult.rows[0].original_name}`, req.ip);
+
+    res.json({ message: 'Access revoked' });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to revoke access' });
+  }
+};
+
 module.exports = {
   upload, download, listFiles, listSharedFiles,
   listDeletedFiles, restoreFile, permanentDelete,
-  searchFiles, deleteFileRecord, shareFile, getStorageStats
+  searchFiles, deleteFileRecord, shareFile, getStorageStats,
+  getFileShares, revokeShare,
 };

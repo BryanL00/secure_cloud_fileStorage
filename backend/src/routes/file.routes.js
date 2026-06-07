@@ -7,7 +7,8 @@ const { authenticate, authorize } = require('../middleware/auth');
 const {
   upload, download, listFiles, listSharedFiles,
   listDeletedFiles, restoreFile, permanentDelete,
-  searchFiles, deleteFileRecord, shareFile, getStorageStats
+  searchFiles, deleteFileRecord, shareFile, getStorageStats,
+  getFileShares, revokeShare,
 } = require('../controllers/file.controller');
 
 // --- Allowlists ---
@@ -94,6 +95,8 @@ router.get('/deleted',          authenticate, authorize('Administrator', 'Depart
 router.get('/',                 authenticate, authorize('Department Manager', 'Project Manager', 'User', 'Guest'), listFiles);
 router.post('/upload',          authenticate, authorize('Department Manager', 'Project Manager', 'User'), uploadLimiter, handleUpload, upload);
 router.get('/download/:id',     authenticate, authorize('Department Manager', 'Project Manager', 'User', 'Guest'), download);
+router.get('/:id/shares',             authenticate, authorize('Department Manager', 'Project Manager'), getFileShares);
+router.delete('/:id/share/:userId',   authenticate, authorize('Department Manager', 'Project Manager'), revokeShare);
 router.post('/:id/restore',     authenticate, authorize('Administrator', 'Department Manager', 'Project Manager', 'User'), restoreFile);
 router.delete('/:id/permanent', authenticate, authorize('Administrator'), permanentDelete);
 router.delete('/:id',           authenticate, authorize('Department Manager', 'Project Manager', 'User'), deleteFileRecord);
