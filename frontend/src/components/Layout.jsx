@@ -38,9 +38,11 @@ const IconShared = () => (
 
 const IconVault = () => (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-    <circle cx="12" cy="16" r="1"/>
+    <polyline points="3 6 5 6 21 6"/>
+    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+    <path d="M10 11v6"/>
+    <path d="M14 11v6"/>
+    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
   </svg>
 );
 
@@ -195,12 +197,11 @@ const Layout = () => {
 
   const extraNavItems = user?.role !== 'Administrator' ? [
     { label: 'Shared Files', icon: <IconShared />, to: '/shared-files' },
-    { label: 'Vault', icon: <IconVault />, to: '/vault' },
+    { label: 'Recycle Bin', icon: <IconVault />, to: '/vault' },
   ] : [
-    { label: 'Vault', icon: <IconVault />, to: '/vault' },
+    { label: 'Recycle Bin', icon: <IconVault />, to: '/vault' },
   ];
 
-  const quickAccessItems = ['Starred', 'Finance', 'Report', 'Event'];
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#F8FAFC' }}>
@@ -241,21 +242,6 @@ const Layout = () => {
             </NavLink>
           ))}
 
-          {/* Quick Access */}
-          {user?.role !== 'Administrator' && (
-            <div style={{ marginTop: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px 8px' }}>
-                <span style={{ fontSize: '11px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Quick Access</span>
-                <span style={{ color: '#94A3B8', fontSize: '18px', lineHeight: 1, cursor: 'pointer' }}>+</span>
-              </div>
-              {quickAccessItems.map(label => (
-                <div key={label} style={{ padding: '9px 12px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px', color: '#64748B', fontSize: '14px', cursor: 'pointer' }}>
-                  <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#CBD5E1', flexShrink: 0 }} />
-                  {label}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
           {/* Storage indicator */}

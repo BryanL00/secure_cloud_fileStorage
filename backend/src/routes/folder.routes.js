@@ -3,7 +3,6 @@ const router = express.Router();
 const pool = require('../utils/db');
 const { authenticate, authorize } = require('../middleware/auth');
 
-const MANAGER_ROLES = ['Administrator', 'Department Manager', 'Project Manager'];
 
 // Create folder
 router.post(
@@ -37,7 +36,7 @@ router.get(
   async (req, res) => {
     try {
       let result;
-      if (MANAGER_ROLES.includes(req.user.role)) {
+      if (['Administrator', 'Department Manager'].includes(req.user.role)) {
         result = await pool.query(
           `SELECT f.*, u.email as owner_email
            FROM folders f

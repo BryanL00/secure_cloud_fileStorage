@@ -112,12 +112,16 @@ const Vault = () => {
             background: 'linear-gradient(135deg, #F59E0B, #D97706)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-              <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6"/>
+              <path d="M14 11v6"/>
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
             </svg>
           </div>
           <div>
-            <h1 style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: '#0F172A' }}>Secure Vault</h1>
+            <h1 style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: '#0F172A' }}>Recycle Bin</h1>
             <p style={{ margin: 0, fontSize: '13px', color: '#64748B' }}>
               {isAdmin
                 ? 'All soft-deleted files — restore or permanently erase after audit'
@@ -148,7 +152,7 @@ const Vault = () => {
       {loading && (
         <div style={{ textAlign: 'center', padding: '60px 0', color: '#64748B' }}>
           <div style={{ width: '36px', height: '36px', borderRadius: '50%', border: '3px solid #E2E8F0', borderTopColor: '#F59E0B', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }}/>
-          Loading vault…
+          Loading recycle bin…
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       )}
@@ -156,10 +160,14 @@ const Vault = () => {
       {/* Empty state */}
       {!loading && !error && files.length === 0 && (
         <div style={{ textAlign: 'center', padding: '60px 24px', background: '#fff', borderRadius: '16px', border: '1px solid #E2E8F0' }}>
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="#CBD5E1" style={{ marginBottom: '16px' }}>
-            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '16px' }}>
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            <path d="M10 11v6"/>
+            <path d="M14 11v6"/>
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
           </svg>
-          <div style={{ fontSize: '16px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>Vault is empty</div>
+          <div style={{ fontSize: '16px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>Recycle Bin is empty</div>
           <div style={{ fontSize: '13px', color: '#94A3B8' }}>
             {isAdmin ? 'No soft-deleted files in the system.' : 'You have no deleted files.'}
           </div>
@@ -170,7 +178,7 @@ const Vault = () => {
       {!loading && files.length > 0 && (
         <>
           <div style={{ fontSize: '13px', color: '#64748B', marginBottom: '16px', fontWeight: '500' }}>
-            {files.length} file{files.length !== 1 ? 's' : ''} in vault
+            {files.length} file{files.length !== 1 ? 's' : ''} in recycle bin
           </div>
           <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #E2E8F0', overflow: 'hidden' }}>
             <div style={{ overflowX: 'auto' }}>

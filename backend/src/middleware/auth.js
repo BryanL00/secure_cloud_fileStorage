@@ -3,11 +3,12 @@ const pool = require('../utils/db');
 
 const authenticate = async (req, res, next) => {
   try {
+    // Extracting the token directly from the secure HttpOnly cookie
     const token = req.cookies?.token;
     if (!token) {
       return res.status(401).json({ message: 'No token provided' });
     }
-
+    // Cryptographic verification of the token's digital signature
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const result = await pool.query(

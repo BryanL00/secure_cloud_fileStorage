@@ -60,10 +60,11 @@ const upload = async (req, res) => {
     const fileBuffer = req.file.buffer;
     const fileId = uuidv4();
     const storageKey = `${fileId}-${req.file.originalname}`;
-
+    // Dynamic symmetric key generation and file encryption
     const aesKey = generateAESKey();
     const iv = generateIV();
     const encryptedBuffer = encryptFile(fileBuffer, aesKey, iv);
+    // Asymmetric RSA wrapping of the AES key
     const encryptedAESKey = encryptAESKey(aesKey);
 
     await log(
@@ -210,8 +211,11 @@ const download = async (req, res) => {
 
     const { encrypted_aes_key, aes_iv } = keyResult.rows[0];
     const encryptedBuffer = await downloadFile(file.storage_key);
+    // RSA decryption to reveal the AES symmetric key
     const aesKey = decryptAESKey(encrypted_aes_key);
     const iv = Buffer.from(aes_iv, 'hex');
+
+    // Decrypting the ciphertext stream for the client
     const decryptedBuffer = decryptFile(encryptedBuffer, aesKey, iv);
 
     await log(

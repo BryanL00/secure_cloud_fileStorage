@@ -101,6 +101,41 @@ router.patch(
   }
 );
 
+// Delete user — Admin only
+router.delete(
+  '/:id',
+  authenticate,
+  authorize('Administrator'),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (id === String(req.user.id)) {
+        return res.status(400).json({ message: 'You cannot delete your own account' });
+      }
+
+      const userResult = await pool.query('SELECT email FROM users WHERE id = $1', [id]);
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      await pool.query('DELETE FROM users WHERE id = $1', [id]);
+
+      await log(
+        req.user.id, req.user.email, req.user.role,
+        ACTIONS.USER_DEACTIVATE, 'users', id,
+        `Permanently deleted user: ${userResult.rows[0].email}`,
+        req.ip
+      );
+
+      res.json({ message: 'User deleted successfully' });
+
+    } catch (error) {
+      res.status(500).json({ message: 'Failed to delete user' });
+    }
+  }
+);
+
 // Deactivate user — Admin only
 router.patch(
   '/:id/deactivate',

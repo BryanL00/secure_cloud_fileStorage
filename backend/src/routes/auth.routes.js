@@ -5,9 +5,9 @@ const { register, login, logout, getMe } = require('../controllers/auth.controll
 const { authenticate, authorize } = require('../middleware/auth');
 
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 10 * 60 * 1000,
   max: 10,
-  message: { message: 'Too many login attempts. Please try again in 15 minutes.' },
+  message: { message: 'Too many login attempts. Please try again in 10 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
 });

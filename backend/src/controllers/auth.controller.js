@@ -17,12 +17,12 @@ function validatePassword(password) {
   return null;
 }
 
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
-  maxAge: 8 * 60 * 60 * 1000, // 8 hours — matches JWT expiry
-};
+    const COOKIE_OPTIONS = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 8 * 60 * 60 * 1000, // 8 hours — matches JWT expiry
+    };
 
 const register = async (req, res) => {
   try {
@@ -51,9 +51,10 @@ const register = async (req, res) => {
     if (roleResult.rows.length === 0) {
       return res.status(400).json({ message: 'Invalid role' });
     }
-
+    // Mathematical one-way hashing with a salt and cost factor of 12
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // Database insertion of the hashed credential, not the plaintext
     const result = await pool.query(
       `INSERT INTO users (email, password_hash, full_name, role_id, department)
        VALUES ($1, $2, $3, $4, $5)
@@ -110,6 +111,8 @@ const login = async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
+
+
     const token = jwt.sign(
       { userId: user.id },
       process.env.JWT_SECRET,
@@ -123,6 +126,7 @@ const login = async (req, res) => {
       req.ip
     );
 
+    // Delivering the token via the secure cookie options
     res.cookie('token', token, COOKIE_OPTIONS);
 
     res.json({

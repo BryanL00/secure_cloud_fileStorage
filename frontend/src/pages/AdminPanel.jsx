@@ -144,6 +144,13 @@ const AdminPanel = () => {
     catch { setError('Failed to deactivate'); }
   };
 
+  const handleDeleteUser = async (userId, email) => {
+    if (!window.confirm(`Permanently delete user "${email}"? This cannot be undone.`)) return;
+    clearMessages();
+    try { await api.delete(`/users/${userId}`); setSuccess('User deleted'); fetchUsers(); }
+    catch (err) { setError(err.response?.data?.message || 'Failed to delete user'); }
+  };
+
   const handleCreateUser = async (e) => {
     e.preventDefault();
     clearMessages();
@@ -235,17 +242,22 @@ const AdminPanel = () => {
                   <select className="neu-input" style={{ padding: '7px 10px', fontSize: '12px' }} value={user.role} onChange={e => handleRoleChange(user.id, e.target.value)}>
                     {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
-                  <select className="neu-input" style={{ padding: '7px 10px', fontSize: '12px' }} value={user.department || ''} onChange={e => handleDepartmentChange(user.id, e.target.value)}>
+                  <select className="neu-input" style={{ padding: '7px 10px', fontSize: '12px', opacity: user.role === 'Guest' ? 0.4 : 1, pointerEvents: user.role === 'Guest' ? 'none' : 'auto' }} value={user.department || ''} onChange={e => handleDepartmentChange(user.id, e.target.value)} disabled={user.role === 'Guest'}>
                     <option value="">No dept</option>
                     {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                   <span className="badge" style={{ background: user.is_active ? '#DCFCE7' : '#FEE2E2', color: user.is_active ? '#16A34A' : '#DC2626' }}>
                     {user.is_active ? 'Active' : 'Inactive'}
                   </span>
-                  <div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
                     {user.is_active && (
                       <button className="neu-btn" style={{ padding: '6px 10px', fontSize: '11px', color: '#DC2626' }} onClick={() => handleDeactivate(user.id)}>
                         Deactivate
+                      </button>
+                    )}
+                    {!user.is_active && (
+                      <button className="neu-btn" style={{ padding: '6px 10px', fontSize: '11px', color: '#fff', background: '#DC2626', border: 'none' }} onClick={() => handleDeleteUser(user.id, user.email)}>
+                        Delete
                       </button>
                     )}
                   </div>
@@ -306,11 +318,11 @@ const AdminPanel = () => {
               </div>
             )}
             {field('Role',
-              <select className="neu-input" value={createForm.role_name} onChange={e => setCreateForm({ ...createForm, role_name: e.target.value })}>
+              <select className="neu-input" value={createForm.role_name} onChange={e => setCreateForm({ ...createForm, role_name: e.target.value, department: e.target.value === 'Guest' ? '' : createForm.department })}>
                 {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
               </select>
             )}
-            {field('Department',
+            {createForm.role_name !== 'Guest' && field('Department',
               <select className="neu-input" value={createForm.department} onChange={e => setCreateForm({ ...createForm, department: e.target.value })}>
                 <option value="">No department</option>
                 {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
