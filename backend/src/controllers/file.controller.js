@@ -57,6 +57,20 @@ const upload = async (req, res) => {
       return res.status(400).json({ message: 'Invalid department' });
     }
 
+    const duplicate = await pool.query(
+      `SELECT id FROM files
+       WHERE owner_id = $1
+         AND original_name = $2
+         AND (folder_id = $3 OR (folder_id IS NULL AND $3::uuid IS NULL))
+         AND is_deleted = FALSE`,
+      [req.user.id, req.file.originalname, folder_id || null]
+    );
+    if (duplicate.rows.length > 0) {
+      return res.status(409).json({
+        message: `A file named "${req.file.originalname}" already exists in this location. Delete or rename the existing file first.`,
+      });
+    }
+
     const fileBuffer = req.file.buffer;
     const fileId = uuidv4();
     const storageKey = `${fileId}-${req.file.originalname}`;

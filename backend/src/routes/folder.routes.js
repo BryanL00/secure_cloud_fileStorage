@@ -14,6 +14,19 @@ router.post(
       const { name, parent_id } = req.body;
       if (!name) return res.status(400).json({ message: 'Folder name required' });
 
+      const duplicate = await pool.query(
+        `SELECT id FROM folders
+         WHERE owner_id = $1
+           AND name = $2
+           AND (parent_id = $3 OR (parent_id IS NULL AND $3::uuid IS NULL))`,
+        [req.user.id, name, parent_id || null]
+      );
+      if (duplicate.rows.length > 0) {
+        return res.status(409).json({
+          message: `A folder named "${name}" already exists in this location.`,
+        });
+      }
+
       const result = await pool.query(
         `INSERT INTO folders (owner_id, name, parent_id)
          VALUES ($1, $2, $3)
