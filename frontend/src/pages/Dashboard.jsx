@@ -43,6 +43,7 @@ const EVENT_COLORS = {
   FILE_RESTORE:          { bg: '#DCFCE7', text: '#16A34A', label: 'RESTORE' },
   FILE_PERMANENT_DELETE: { bg: '#FEE2E2', text: '#991B1B', label: 'PERM DELETE' },
   USER_ROLE_UPDATE:      { bg: '#FEF3C7', text: '#B45309', label: 'ROLE UPDATE' },
+  USER_DEPARTMENT_UPDATE:{ bg: '#E0E7FF', text: '#4338CA', label: 'DEPT UPDATE' },
   USER_DEACTIVATE:       { bg: '#FEE2E2', text: '#DC2626', label: 'DEACTIVATE' },
   LOGIN:                 { bg: '#F0FDF4', text: '#16A34A', label: 'LOGIN' },
 };
@@ -311,7 +312,7 @@ const SecurityAuditTrail = () => {
     },
   ];
 
-  const FILTER_OPTIONS = ['ALL','FILE_UPLOAD','FILE_DOWNLOAD','FILE_DELETE','FILE_SHARE','FILE_ENCRYPT','FILE_DECRYPT','ACCESS_DENIED','LOGIN','USER_ROLE_UPDATE','USER_DEACTIVATE'];
+  const FILTER_OPTIONS = ['ALL','FILE_UPLOAD','FILE_DOWNLOAD','FILE_DELETE','FILE_SHARE','FILE_ENCRYPT','FILE_DECRYPT','ACCESS_DENIED','LOGIN','USER_ROLE_UPDATE','USER_DEPARTMENT_UPDATE','USER_DEACTIVATE'];
   const filtered = filter === 'ALL' ? logs : logs.filter(l => l.action === filter);
 
   const deptCounts = {};

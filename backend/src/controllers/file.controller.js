@@ -11,6 +11,89 @@ const { log, ACTIONS } = require('../utils/auditLog');
 const DEPARTMENTS = ['IT', 'Finance', 'Marketing', 'HR', 'Operations'];
 const QUOTA_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB per user
 
+const VALID_LEVELS = ['low', 'medium', 'high', 'confidential'];
+
+// Current non-deleted storage used by a user, in bytes.
+const getUsedBytes = async (userId) => {
+  const r = await pool.query(
+    `SELECT COALESCE(SUM(size_bytes), 0)::bigint AS used_bytes
+     FROM files WHERE owner_id = $1 AND is_deleted = FALSE`,
+    [userId]
+  );
+  return Number(r.rows[0].used_bytes);
+};
+
+// True if the user already has a live file with this name in the target folder.
+const isDuplicateFile = async (userId, name, folderId) => {
+  const r = await pool.query(
+    `SELECT id FROM files
+     WHERE owner_id = $1
+       AND original_name = $2
+       AND (folder_id = $3 OR (folder_id IS NULL AND $3::uuid IS NULL))
+       AND is_deleted = FALSE`,
+    [userId, name, folderId || null]
+  );
+  return r.rows.length > 0;
+};
+
+// Encrypts one file, stores it in MinIO, records it in the DB, and audits it.
+// Shared by both the single-file and batch (folder) upload paths.
+const storeEncryptedFile = async (user, file, meta, ip) => {
+  const { sensitivity_level, project_category, folder_id, department } = meta;
+  const fileId = uuidv4();
+  const storageKey = `${fileId}-${file.originalname}`;
+
+  // Dynamic symmetric key generation and file encryption
+  const aesKey = generateAESKey();
+  const iv = generateIV();
+  const encryptedBuffer = encryptFile(file.buffer, aesKey, iv);
+  // Asymmetric RSA wrapping of the AES key
+  const encryptedAESKey = encryptAESKey(aesKey);
+
+  await log(
+    user.id, user.email, user.role,
+    ACTIONS.FILE_ENCRYPT, 'files', fileId,
+    `Encrypted: ${file.originalname} | AES-256-CBC | RSA-wrapped key | size: ${file.size} bytes`,
+    ip
+  );
+
+  await uploadFile(storageKey, encryptedBuffer);
+
+  await pool.query(
+    `INSERT INTO files
+      (id, owner_id, original_name, storage_key, size_bytes,
+       mime_type, sensitivity_level, project_category, folder_id, department)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      fileId, user.id, file.originalname, storageKey,
+      file.size, file.mimetype, sensitivity_level,
+      project_category, folder_id || null, department || null
+    ]
+  );
+
+  await pool.query(
+    `INSERT INTO file_encryption_keys (file_id, encrypted_aes_key, aes_iv)
+     VALUES ($1, $2, $3)`,
+    [fileId, encryptedAESKey, iv.toString('hex')]
+  );
+
+  await log(
+    user.id, user.email, user.role,
+    ACTIONS.FILE_UPLOAD, 'files', fileId,
+    `Uploaded: ${file.originalname} | sensitivity: ${sensitivity_level} | dept: ${department}`,
+    ip
+  );
+
+  return {
+    id: fileId,
+    original_name: file.originalname,
+    sensitivity_level,
+    project_category,
+    department,
+    size_bytes: file.size,
+  };
+};
+
 const upload = async (req, res) => {
   try {
     if (!req.file) {
@@ -18,11 +101,7 @@ const upload = async (req, res) => {
     }
 
     // Enforce storage quota before processing
-    const quotaResult = await pool.query(
-      `SELECT COALESCE(SUM(size_bytes), 0)::bigint AS used_bytes FROM files WHERE owner_id = $1 AND is_deleted = FALSE`,
-      [req.user.id]
-    );
-    const usedBytes = Number(quotaResult.rows[0].used_bytes);
+    const usedBytes = await getUsedBytes(req.user.id);
     if (usedBytes + req.file.size > QUOTA_BYTES) {
       await log(
         req.user.id, req.user.email, req.user.role,
@@ -48,88 +127,111 @@ const upload = async (req, res) => {
       department = null
     } = req.body;
 
-    const validLevels = ['low', 'medium', 'high', 'confidential'];
-    if (!validLevels.includes(sensitivity_level)) {
+    if (!VALID_LEVELS.includes(sensitivity_level)) {
       return res.status(400).json({ message: 'Invalid sensitivity level' });
     }
-
     if (department && !DEPARTMENTS.includes(department)) {
       return res.status(400).json({ message: 'Invalid department' });
     }
 
-    const duplicate = await pool.query(
-      `SELECT id FROM files
-       WHERE owner_id = $1
-         AND original_name = $2
-         AND (folder_id = $3 OR (folder_id IS NULL AND $3::uuid IS NULL))
-         AND is_deleted = FALSE`,
-      [req.user.id, req.file.originalname, folder_id || null]
-    );
-    if (duplicate.rows.length > 0) {
+    if (await isDuplicateFile(req.user.id, req.file.originalname, folder_id)) {
       return res.status(409).json({
         message: `A file named "${req.file.originalname}" already exists in this location. Delete or rename the existing file first.`,
       });
     }
 
-    const fileBuffer = req.file.buffer;
-    const fileId = uuidv4();
-    const storageKey = `${fileId}-${req.file.originalname}`;
-    // Dynamic symmetric key generation and file encryption
-    const aesKey = generateAESKey();
-    const iv = generateIV();
-    const encryptedBuffer = encryptFile(fileBuffer, aesKey, iv);
-    // Asymmetric RSA wrapping of the AES key
-    const encryptedAESKey = encryptAESKey(aesKey);
-
-    await log(
-      req.user.id, req.user.email, req.user.role,
-      ACTIONS.FILE_ENCRYPT, 'files', fileId,
-      `Encrypted: ${req.file.originalname} | AES-256-CBC | RSA-wrapped key | size: ${req.file.size} bytes`,
+    const file = await storeEncryptedFile(
+      req.user, req.file,
+      { sensitivity_level, project_category, folder_id, department },
       req.ip
     );
 
-    await uploadFile(storageKey, encryptedBuffer);
-
-    await pool.query(
-      `INSERT INTO files
-        (id, owner_id, original_name, storage_key, size_bytes,
-         mime_type, sensitivity_level, project_category, folder_id, department)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [
-        fileId, req.user.id, req.file.originalname, storageKey,
-        req.file.size, req.file.mimetype, sensitivity_level,
-        project_category, folder_id || null, department || null
-      ]
-    );
-
-    await pool.query(
-      `INSERT INTO file_encryption_keys (file_id, encrypted_aes_key, aes_iv)
-       VALUES ($1, $2, $3)`,
-      [fileId, encryptedAESKey, iv.toString('hex')]
-    );
-
-    await log(
-      req.user.id, req.user.email, req.user.role,
-      ACTIONS.FILE_UPLOAD, 'files', fileId,
-      `Uploaded: ${req.file.originalname} | sensitivity: ${sensitivity_level} | dept: ${department}`,
-      req.ip
-    );
-
-    res.status(201).json({
-      message: 'File uploaded and encrypted successfully',
-      file: {
-        id: fileId,
-        original_name: req.file.originalname,
-        sensitivity_level,
-        project_category,
-        department,
-        size_bytes: req.file.size
-      }
-    });
-
+    res.status(201).json({ message: 'File uploaded and encrypted successfully', file });
   } catch (error) {
     console.error('Upload error:', error.message);
     res.status(500).json({ message: 'Upload failed', error: error.message });
+  }
+};
+
+// Batch (folder) upload — many files in one request. Each file is processed
+// independently so one duplicate/failure doesn't abort the rest. The client
+// sends a parallel `folder_ids` JSON array aligned with the files' order.
+const uploadBatch = async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      // Everything may have been rejected by magic-byte validation upstream.
+      if (req.invalidFiles && req.invalidFiles.length > 0) {
+        return res.status(201).json({
+          message: `Uploaded 0 of ${req.invalidFiles.length} file(s)`,
+          uploaded: [], skipped: [],
+          failed: req.invalidFiles.map(b => ({ name: b.name, reason: b.reason })),
+        });
+      }
+      return res.status(400).json({ message: 'No files provided' });
+    }
+
+    const {
+      sensitivity_level = 'low',
+      project_category = '',
+      department = null,
+    } = req.body;
+
+    if (!VALID_LEVELS.includes(sensitivity_level)) {
+      return res.status(400).json({ message: 'Invalid sensitivity level' });
+    }
+    if (department && !DEPARTMENTS.includes(department)) {
+      return res.status(400).json({ message: 'Invalid department' });
+    }
+
+    let folderIds = [];
+    if (req.body.folder_ids) {
+      try { folderIds = JSON.parse(req.body.folder_ids); } catch { folderIds = []; }
+    }
+
+    const results = { uploaded: [], skipped: [], failed: [] };
+
+    // Files rejected upstream by magic-byte validation (attached by middleware).
+    for (const bad of req.invalidFiles || []) {
+      results.failed.push({ name: bad.name, reason: bad.reason });
+    }
+
+    let usedBytes = await getUsedBytes(req.user.id);
+
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+      const folder_id = folderIds[i] || null;
+      try {
+        if (usedBytes + file.size > QUOTA_BYTES) {
+          results.failed.push({ name: file.originalname, reason: 'Storage quota exceeded' });
+          continue;
+        }
+        if (await isDuplicateFile(req.user.id, file.originalname, folder_id)) {
+          results.skipped.push({ name: file.originalname, reason: 'Already exists' });
+          continue;
+        }
+        const rec = await storeEncryptedFile(
+          req.user, file,
+          { sensitivity_level, project_category, folder_id, department },
+          req.ip
+        );
+        usedBytes += file.size;
+        results.uploaded.push(rec);
+      } catch (e) {
+        console.error('Batch file error:', file.originalname, e.message);
+        results.failed.push({ name: file.originalname, reason: e.message });
+      }
+    }
+
+    const total = req.files.length + (req.invalidFiles ? req.invalidFiles.length : 0);
+    res.status(201).json({
+      message: `Uploaded ${results.uploaded.length} of ${total} file(s)`,
+      uploaded: results.uploaded,
+      skipped: results.skipped,
+      failed: results.failed,
+    });
+  } catch (error) {
+    console.error('Batch upload error:', error.message);
+    res.status(500).json({ message: 'Batch upload failed', error: error.message });
   }
 };
 
@@ -676,7 +778,7 @@ const revokeShare = async (req, res) => {
 };
 
 module.exports = {
-  upload, download, listFiles, listSharedFiles,
+  upload, uploadBatch, download, listFiles, listSharedFiles,
   listDeletedFiles, restoreFile, permanentDelete,
   searchFiles, deleteFileRecord, shareFile, getStorageStats,
   getFileShares, revokeShare,

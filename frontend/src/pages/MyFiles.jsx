@@ -37,6 +37,8 @@ const MyFiles = () => {
       const [filesRes, foldersRes] = await Promise.all([api.get('/files'), api.get('/folders')]);
       setFiles(filesRes.data.files);
       setFolders(foldersRes.data.folders);
+      // Refresh the sidebar storage indicator in step with the file list.
+      window.dispatchEvent(new Event('storage-updated'));
     } catch { setError('Failed to load files'); }
     finally { setLoading(false); }
   };
@@ -72,7 +74,10 @@ const MyFiles = () => {
   };
 
   const handleFolderUpload = async (e) => {
-    const fileList = Array.from(e.target.files);
+    // Skip OS junk / hidden files (.DS_Store, .git, etc.) that folders carry.
+    const fileList = Array.from(e.target.files).filter(
+      f => !f.webkitRelativePath.split('/').some(seg => seg.startsWith('.'))
+    );
     if (!fileList.length) return;
     setUploading(true); setError(''); setSuccess('');
     try {
@@ -92,22 +97,36 @@ const MyFiles = () => {
         const res = await api.post('/folders', { name, parent_id: folderIdMap[parentPath] || null });
         folderIdMap[path] = res.data.folder.id;
       }
-      let uploaded = 0;
-      for (const file of fileList) {
-        const parts = file.webkitRelativePath.split('/');
-        const fileFolderPath = parts.slice(0, -1).join('/');
-        const folderId = folderIdMap[fileFolderPath] || currentFolder || null;
+      // Send files in batches so a large folder costs a few requests, not one
+      // per file (which would trip the upload rate limit). Must match the
+      // backend's MAX_BATCH_FILES.
+      const BATCH_SIZE = 50;
+      let processed = 0, totalUploaded = 0, totalSkipped = 0, totalFailed = 0;
+      for (let i = 0; i < fileList.length; i += BATCH_SIZE) {
+        const batch = fileList.slice(i, i + BATCH_SIZE);
         const fd = new FormData();
-        fd.append('file', file);
+        const folderIds = [];
+        for (const file of batch) {
+          const parts = file.webkitRelativePath.split('/');
+          const fileFolderPath = parts.slice(0, -1).join('/');
+          fd.append('files', file);
+          folderIds.push(folderIdMap[fileFolderPath] || currentFolder || null);
+        }
+        fd.append('folder_ids', JSON.stringify(folderIds));
         fd.append('sensitivity_level', uploadForm.sensitivity_level);
         fd.append('project_category', uploadForm.project_category);
         fd.append('department', uploadForm.department || '');
-        if (folderId) fd.append('folder_id', folderId);
-        await api.post('/files/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-        uploaded++;
-        setSuccess(`Uploading... ${uploaded}/${fileList.length} files`);
+        const res = await api.post('/files/upload/batch', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        totalUploaded += res.data.uploaded?.length || 0;
+        totalSkipped += res.data.skipped?.length || 0;
+        totalFailed += res.data.failed?.length || 0;
+        processed += batch.length;
+        setSuccess(`Uploading... ${processed}/${fileList.length} files`);
       }
-      setSuccess(`Successfully uploaded ${fileList.length} files`);
+      let summary = `Uploaded ${totalUploaded} of ${fileList.length} files`;
+      if (totalSkipped) summary += ` · ${totalSkipped} skipped (already exist)`;
+      if (totalFailed) summary += ` · ${totalFailed} failed`;
+      setSuccess(summary);
       setShowUpload(false); fetchData();
     } catch (err) { setError(err.response?.data?.message || 'Folder upload failed'); }
     finally { setUploading(false); }
@@ -185,7 +204,7 @@ const MyFiles = () => {
   const handleSingleDelete = async (fileId) => {
     if (!window.confirm('Delete this file?')) return;
     try { await handleDeleteFile(fileId); setSuccess('File deleted'); fetchData(); }
-    catch { setError('Delete failed'); }
+    catch (err) { setError(err.response?.data?.message || 'Delete failed'); }
   };
 
   const handleBulkDelete = async () => {
@@ -201,7 +220,7 @@ const MyFiles = () => {
   const handleDeleteFolder = async (folderId) => {
     if (!window.confirm('Delete this folder?')) return;
     try { await api.delete(`/folders/${folderId}`); setSuccess('Folder deleted'); fetchData(); }
-    catch { setError('Delete failed'); }
+    catch (err) { setError(err.response?.data?.message || 'Delete failed'); }
   };
 
   const toggleFileSelect = (fileId) =>

@@ -133,7 +133,12 @@ const Layout = () => {
 
   useEffect(() => {
     if (user?.role === 'Administrator') return;
-    api.get('/files/storage').then(res => setStorage(res.data)).catch(() => {});
+    const fetchStorage = () =>
+      api.get('/files/storage').then(res => setStorage(res.data)).catch(() => {});
+    fetchStorage();
+    // Pages dispatch this after any operation that changes storage usage.
+    window.addEventListener('storage-updated', fetchStorage);
+    return () => window.removeEventListener('storage-updated', fetchStorage);
   }, [user]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -361,7 +366,7 @@ const Layout = () => {
                                 {file.sensitivity_level}
                               </span>
                               {file.department && <span style={{ fontSize: '11px', color: '#94A3B8' }}>{file.department}</span>}
-                              <span style={{ fontSize: '11px', color: '#94A3B8' }}>{fmt(file.size_bytes)}</span>
+                              <span style={{ fontSize: '11px', color: '#94A3B8' }}>{fmtStorage(file.size_bytes)}</span>
                             </div>
                           </div>
                           <button onClick={() => handleDownload(file.id, file.original_name)} style={{

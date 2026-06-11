@@ -66,6 +66,7 @@ const Vault = () => {
     try {
       await api.post(`/files/${file.id}/restore`);
       setFiles(prev => prev.filter(f => f.id !== file.id));
+      window.dispatchEvent(new Event('storage-updated'));
       showToast(`"${file.original_name}" restored successfully.`);
     } catch (err) {
       showToast(err.response?.data?.message || 'Restore failed', 'error');

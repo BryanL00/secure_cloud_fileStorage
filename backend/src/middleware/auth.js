@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../utils/db');
+const { log, ACTIONS } = require('../utils/auditLog');
 
 const authenticate = async (req, res, next) => {
   try {
@@ -41,6 +42,13 @@ const authenticate = async (req, res, next) => {
 const authorize = (...allowedRoles) => {
   return (req, res, next) => {
     if (!allowedRoles.includes(req.user.role)) {
+      // Audit every role-based denial. Fire-and-forget; log() swallows errors.
+      log(
+        req.user.id, req.user.email, req.user.role,
+        ACTIONS.ACCESS_DENIED, 'auth', null,
+        `Denied ${req.method} ${req.originalUrl} — role '${req.user.role}' lacks permission (allowed: ${allowedRoles.join(', ')})`,
+        req.ip
+      );
       return res.status(403).json({
         message: 'Access denied: insufficient permissions'
       });
