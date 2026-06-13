@@ -6,8 +6,8 @@ const rateLimit = require('express-rate-limit');
 const fileType = require('file-type');
 const { authenticate, authorize } = require('../middleware/auth');
 const {
-  upload, uploadBatch, download, listFiles, listSharedFiles,
-  listDeletedFiles, restoreFile, permanentDelete,
+  upload, uploadBatch, download, preview, listFiles, listSharedFiles,
+  listDeletedFiles, restoreFile, permanentDelete, emptyRecycleBin,
   searchFiles, deleteFileRecord, shareFile, getStorageStats,
   getFileShares, revokeShare,
 } = require('../controllers/file.controller');
@@ -213,10 +213,12 @@ router.get('/storage',          authenticate, authorize('Department Manager', 'P
 router.get('/search',           authenticate, authorize('Department Manager', 'Project Manager', 'User', 'Guest'), searchFiles);
 router.get('/shared',           authenticate, authorize('Department Manager', 'Project Manager', 'User', 'Guest'), listSharedFiles);
 router.get('/deleted',          authenticate, authorize('Administrator', 'Department Manager', 'Project Manager', 'User'), listDeletedFiles);
+router.delete('/recycle-bin/empty', authenticate, authorize('Administrator'), emptyRecycleBin);
 router.get('/',                 authenticate, authorize('Department Manager', 'Project Manager', 'User', 'Guest'), listFiles);
 router.post('/upload',          authenticate, authorize('Department Manager', 'Project Manager', 'User'), uploadLimiter, handleUpload, validateMagicBytes, upload);
 router.post('/upload/batch',    authenticate, authorize('Department Manager', 'Project Manager', 'User'), uploadLimiter, handleBatchUpload, validateMagicBytesBatch, uploadBatch);
 router.get('/download/:id',     authenticate, authorize('Department Manager', 'Project Manager', 'User', 'Guest'), download);
+router.get('/preview/:id',      authenticate, authorize('Department Manager', 'Project Manager', 'User', 'Guest'), preview);
 router.get('/:id/shares',             authenticate, authorize('Department Manager', 'Project Manager'), getFileShares);
 router.delete('/:id/share/:userId',   authenticate, authorize('Department Manager', 'Project Manager'), revokeShare);
 router.post('/:id/restore',     authenticate, authorize('Administrator', 'Department Manager', 'Project Manager', 'User'), restoreFile);

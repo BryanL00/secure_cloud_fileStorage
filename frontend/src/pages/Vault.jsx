@@ -73,6 +73,21 @@ const Vault = () => {
     } finally { setActionLoading(null); }
   };
 
+  const handleEmptyRecycleBin = async () => {
+    const confirmed = window.confirm(
+      `EMPTY THE ENTIRE RECYCLE BIN?\n\nThis permanently erases all ${files.length} file(s) and their encryption keys. This action cannot be undone.`
+    );
+    if (!confirmed) return;
+    setActionLoading('empty-bin');
+    try {
+      const res = await api.delete('/files/recycle-bin/empty');
+      setFiles([]);
+      showToast(res.data.message || 'Recycle bin emptied.', 'warning');
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to empty recycle bin', 'error');
+    } finally { setActionLoading(null); }
+  };
+
   const handlePermanentDelete = async (file) => {
     const confirmed = window.confirm(
       `PERMANENTLY DELETE "${file.original_name}"?\n\nThis action cannot be undone. The file and all its encryption keys will be erased forever.`
@@ -178,8 +193,24 @@ const Vault = () => {
       {/* Table */}
       {!loading && files.length > 0 && (
         <>
-          <div style={{ fontSize: '13px', color: '#64748B', marginBottom: '16px', fontWeight: '500' }}>
-            {files.length} file{files.length !== 1 ? 's' : ''} in recycle bin
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', gap: '12px' }}>
+            <div style={{ fontSize: '13px', color: '#64748B', fontWeight: '500' }}>
+              {files.length} file{files.length !== 1 ? 's' : ''} in recycle bin
+            </div>
+            {isAdmin && (
+              <button
+                onClick={handleEmptyRecycleBin}
+                disabled={actionLoading === 'empty-bin'}
+                style={{
+                  padding: '8px 16px', fontSize: '13px', fontWeight: '600',
+                  color: '#fff', background: '#DC2626', border: 'none',
+                  borderRadius: '8px', cursor: actionLoading === 'empty-bin' ? 'not-allowed' : 'pointer',
+                  opacity: actionLoading === 'empty-bin' ? 0.6 : 1,
+                }}
+              >
+                {actionLoading === 'empty-bin' ? 'Emptying…' : 'Empty Recycle Bin'}
+              </button>
+            )}
           </div>
           <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #E2E8F0', overflow: 'hidden' }}>
             <div style={{ overflowX: 'auto' }}>

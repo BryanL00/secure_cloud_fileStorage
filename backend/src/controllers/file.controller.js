@@ -235,7 +235,10 @@ const uploadBatch = async (req, res) => {
   }
 };
 
-const download = async (req, res) => {
+// Serves a file's decrypted bytes. In preview mode, 'metadata' (view-only)
+// grants access and the file is sent inline; in download mode, only 'viewer'
+// (or the owner) may retrieve it and it's sent as an attachment.
+const serveFile = async (req, res, { isPreview }) => {
   try {
     const { id } = req.params;
 
@@ -257,7 +260,7 @@ const download = async (req, res) => {
       await log(
         req.user.id, req.user.email, req.user.role,
         ACTIONS.ACCESS_DENIED, 'files', id,
-        'Administrator attempted to download file — not permitted',
+        `Administrator attempted to ${isPreview ? 'preview' : 'download'} file — not permitted`,
         req.ip
       );
       return res.status(403).json({
@@ -278,13 +281,14 @@ const download = async (req, res) => {
         await log(
           req.user.id, req.user.email, req.user.role,
           ACTIONS.ACCESS_DENIED, 'files', id,
-          'Attempted to download file without permission',
+          `Attempted to ${isPreview ? 'preview' : 'download'} file without permission`,
           req.ip
         );
         return res.status(403).json({ message: 'Access denied' });
       }
 
-      if (permResult.rows[0].permission_level !== 'viewer') {
+      // Download requires 'viewer'; preview also allows 'metadata' (view-only).
+      if (!isPreview && permResult.rows[0].permission_level !== 'viewer') {
         await log(
           req.user.id, req.user.email, req.user.role,
           ACTIONS.ACCESS_DENIED, 'files', id,
@@ -292,7 +296,7 @@ const download = async (req, res) => {
           req.ip
         );
         return res.status(403).json({
-          message: 'You have metadata-only access to this file and cannot download it'
+          message: 'You have view-only access to this file and cannot download it'
         });
       }
     }
@@ -312,7 +316,7 @@ const download = async (req, res) => {
     await log(
       req.user.id, req.user.email, req.user.role,
       ACTIONS.ACCESS_EVAL, 'files', id,
-      `Access evaluation passed: role=${req.user.role}, sensitivity=${file.sensitivity_level}, owner=${isOwner}`,
+      `Access evaluation passed: role=${req.user.role}, sensitivity=${file.sensitivity_level}, owner=${isOwner}, mode=${isPreview ? 'preview' : 'download'}`,
       req.ip
     );
 
@@ -341,21 +345,29 @@ const download = async (req, res) => {
       req.ip
     );
 
-    await log(
-      req.user.id, req.user.email, req.user.role,
-      ACTIONS.FILE_DOWNLOAD, 'files', id,
-      `Downloaded: ${file.original_name}`,
-      req.ip
-    );
+    if (!isPreview) {
+      await log(
+        req.user.id, req.user.email, req.user.role,
+        ACTIONS.FILE_DOWNLOAD, 'files', id,
+        `Downloaded: ${file.original_name}`,
+        req.ip
+      );
+    }
 
-    res.setHeader('Content-Disposition', `attachment; filename="${file.original_name}"`);
+    res.setHeader(
+      'Content-Disposition',
+      `${isPreview ? 'inline' : 'attachment'}; filename="${file.original_name}"`
+    );
     res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
     res.send(decryptedBuffer);
 
   } catch (error) {
-    res.status(500).json({ message: 'Download failed', error: error.message });
+    res.status(500).json({ message: `${isPreview ? 'Preview' : 'Download'} failed`, error: error.message });
   }
 };
+
+const download = (req, res) => serveFile(req, res, { isPreview: false });
+const preview = (req, res) => serveFile(req, res, { isPreview: true });
 
 const listFiles = async (req, res) => {
   try {
@@ -523,6 +535,48 @@ const permanentDelete = async (req, res) => {
     res.json({ message: 'File permanently deleted' });
   } catch (error) {
     res.status(500).json({ message: 'Permanent delete failed', error: error.message });
+  }
+};
+
+// Permanently erase every soft-deleted file system-wide. Administrator only.
+const emptyRecycleBin = async (req, res) => {
+  try {
+    const deletedFiles = await pool.query(
+      'SELECT id, storage_key, original_name FROM files WHERE is_deleted = TRUE'
+    );
+
+    if (deletedFiles.rows.length === 0) {
+      return res.json({ message: 'Recycle bin is already empty', erased: 0 });
+    }
+
+    const ids = deletedFiles.rows.map(f => f.id);
+
+    await pool.query('DELETE FROM file_encryption_keys WHERE file_id = ANY($1)', [ids]);
+    await pool.query('DELETE FROM file_permissions WHERE file_id = ANY($1)', [ids]);
+    await pool.query('DELETE FROM files WHERE id = ANY($1)', [ids]);
+
+    // Remove the encrypted objects from MinIO; failures here are non-fatal.
+    let storageErrors = 0;
+    for (const file of deletedFiles.rows) {
+      try {
+        await deleteFile(file.storage_key);
+      } catch (e) {
+        storageErrors++;
+        console.error('MinIO delete (non-fatal):', file.storage_key, e.message);
+      }
+    }
+
+    await log(
+      req.user.id, req.user.email, req.user.role,
+      ACTIONS.FILE_PERMANENT_DELETE, 'files', null,
+      `Emptied recycle bin — permanently erased ${ids.length} file(s)` +
+        (storageErrors ? ` (${storageErrors} storage object(s) could not be removed)` : ''),
+      req.ip
+    );
+
+    res.json({ message: `Permanently erased ${ids.length} file(s)`, erased: ids.length });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to empty recycle bin', error: error.message });
   }
 };
 
@@ -778,8 +832,8 @@ const revokeShare = async (req, res) => {
 };
 
 module.exports = {
-  upload, uploadBatch, download, listFiles, listSharedFiles,
-  listDeletedFiles, restoreFile, permanentDelete,
+  upload, uploadBatch, download, preview, listFiles, listSharedFiles,
+  listDeletedFiles, restoreFile, permanentDelete, emptyRecycleBin,
   searchFiles, deleteFileRecord, shareFile, getStorageStats,
   getFileShares, revokeShare,
 };

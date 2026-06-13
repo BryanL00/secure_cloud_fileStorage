@@ -57,7 +57,7 @@ const SharedFiles = () => {
   const handlePreview = async (file) => {
     setPreviewFile(file); setPreviewUrl(null); setPreviewLoading(true);
     try {
-      const res = await api.get(`/files/download/${file.id}`, { responseType: 'blob' });
+      const res = await api.get(`/files/preview/${file.id}`, { responseType: 'blob' });
       setPreviewUrl(URL.createObjectURL(new Blob([res.data], { type: file.mime_type || 'application/octet-stream' })));
     } catch { setPreviewFile(null); alert('Preview failed'); }
     finally { setPreviewLoading(false); }
