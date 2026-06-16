@@ -9,6 +9,7 @@ A Final Year Project (FYP) that delivers a secure, browser-based file storage sy
 ### Security
 - **AES-256-CBC file encryption** with a unique key and IV per file
 - **RSA key wrapping** — the per-file AES key is encrypted with an RSA public key before storage
+- **HTTPS / TLS** — client ↔ server traffic is encrypted in transit (self-signed cert for local dev)
 - **JWT authentication** via HTTP-only cookies (no tokens in localStorage)
 - **bcrypt** password hashing
 - **Rate limiting** — 10 login attempts per 10 minutes; 30 uploads per 15 minutes
@@ -91,12 +92,23 @@ MINIO_PORT=9000
 MINIO_ACCESS_KEY=your_minio_access_key
 MINIO_SECRET_KEY=your_minio_secret_key
 MINIO_BUCKET=encrypted-files
+# TLS for the server <-> MinIO hop. Set to false only for a plain-HTTP MinIO.
+MINIO_USE_SSL=true
+# CA used to trust a self-signed MinIO cert (defaults to backend/certs/server.cert)
+MINIO_CA_CERT=./certs/server.cert
 JWT_SECRET=your_jwt_secret
 RSA_PRIVATE_KEY_PATH=./keys/private.pem
 RSA_PUBLIC_KEY_PATH=./keys/public.pem
 PORT=3001
-FRONTEND_URL=http://localhost:5173
+FRONTEND_URL=https://localhost:5173
+# Optional — override the default TLS cert/key location (backend/certs/)
+SSL_KEY_PATH=./certs/server.key
+SSL_CERT_PATH=./certs/server.cert
 ```
+
+> The backend serves **HTTPS** when a TLS key/cert pair is present (default
+> `backend/certs/`). If the certs are missing it falls back to plain HTTP with a
+> warning — useful when TLS is terminated by a reverse proxy in production.
 
 ---
 
@@ -121,7 +133,23 @@ openssl genrsa -out backend/keys/private.pem 2048
 openssl rsa -in backend/keys/private.pem -pubout -out backend/keys/public.pem
 ```
 
-### 3. Install Dependencies
+### 3. TLS Certificate (HTTPS)
+
+Generate a self-signed certificate for the development server. The frontend dev
+server reuses this same cert, so both client and server run over HTTPS:
+
+```bash
+mkdir -p backend/certs
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout backend/certs/server.key -out backend/certs/server.cert -days 825 \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
+
+Because the cert is self-signed, your browser will show a one-time security
+warning the first time you open the app — click through it to proceed.
+
+### 4. Install Dependencies
 
 ```bash
 # Backend
@@ -139,11 +167,21 @@ The system requires **three processes** running simultaneously:
 
 ### 1. MinIO (object storage)
 
+MinIO serves over **TLS** when it finds a cert pair in its certs directory.
+Reuse the project's self-signed cert (MinIO expects the exact filenames
+`public.crt` and `private.key`):
+
 ```bash
+mkdir -p ~/.minio/certs
+cp backend/certs/server.cert ~/.minio/certs/public.crt
+cp backend/certs/server.key  ~/.minio/certs/private.key
+
 minio server ~/minio-data --console-address :9001
 ```
 
-Access the MinIO console at `http://localhost:9001` to create the bucket named `encrypted-files`.
+Access the MinIO console at `https://localhost:9001` to create the bucket named
+`encrypted-files`. (For a plain-HTTP MinIO instead, omit the certs and set
+`MINIO_USE_SSL=false` in `backend/.env`.)
 
 ### 2. Backend API
 
@@ -154,7 +192,7 @@ npm run dev        # development (nodemon)
 npm start          # production
 ```
 
-Runs on `http://localhost:3001`
+Runs on `https://localhost:3001`
 
 ### 3. Frontend
 
@@ -163,7 +201,7 @@ cd frontend
 npm run dev
 ```
 
-Runs on `http://localhost:5173`
+Runs on `https://localhost:5173`
 
 ---
 

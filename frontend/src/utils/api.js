@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://localhost:3001/api',
+  // Defaults to the TLS-enabled backend; override with VITE_API_URL if needed.
+  baseURL: import.meta.env.VITE_API_URL || 'https://localhost:3001/api',
   withCredentials: true,
 });
 

@@ -19,7 +19,7 @@ function validatePassword(password) {
 
     const COOKIE_OPTIONS = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: true, // served over HTTPS in all environments (mkcert in dev)
       sameSite: 'lax',
       maxAge: 8 * 60 * 60 * 1000, // 8 hours — matches JWT expiry
     };
