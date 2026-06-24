@@ -384,10 +384,7 @@ const listFiles = async (req, res) => {
        FROM files f
        JOIN users u ON f.owner_id = u.id
        WHERE f.is_deleted = FALSE
-         AND (
-           f.owner_id = $1
-           OR f.id IN (SELECT file_id FROM file_permissions WHERE granted_to_user_id = $1)
-         )
+         AND f.owner_id = $1
        ORDER BY f.uploaded_at DESC`,
       [req.user.id]
     );
@@ -603,10 +600,7 @@ const searchFiles = async (req, res) => {
        FROM files f
        JOIN users u ON f.owner_id = u.id
        WHERE f.is_deleted = FALSE
-         AND (
-           f.owner_id = $1
-           OR f.id IN (SELECT file_id FROM file_permissions WHERE granted_to_user_id = $1)
-         )
+         AND f.owner_id = $1
          AND (
            LOWER(f.original_name) LIKE $2
            OR LOWER(COALESCE(f.project_category, '')) LIKE $2

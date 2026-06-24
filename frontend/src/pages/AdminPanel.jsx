@@ -5,7 +5,7 @@ const DEPARTMENTS = ['IT', 'Finance', 'Marketing', 'HR', 'Operations'];
 const ROLES       = ['Administrator', 'Department Manager', 'Project Manager', 'User', 'Guest'];
 const ALL_ACTIONS = [
   'LOGIN', 'LOGOUT', 'REGISTER',
-  'FILE_UPLOAD', 'FILE_DOWNLOAD', 'FILE_DELETE', 'FILE_SHARE',
+  'FILE_UPLOAD', 'UPLOAD_BLOCKED', 'FILE_DOWNLOAD', 'FILE_DELETE', 'FILE_SHARE',
   'FILE_ENCRYPT', 'FILE_DECRYPT', 'FILE_RESTORE', 'FILE_PERMANENT_DELETE',
   'FOLDER_CREATE', 'FOLDER_DELETE',
   'USER_ROLE_UPDATE', 'USER_DEPARTMENT_UPDATE', 'USER_DEACTIVATE',
@@ -34,6 +34,7 @@ const ROLE_HINTS = {
 const ACTION_COLORS = {
   LOGIN:            '#16A34A',
   FILE_UPLOAD:      '#2563EB',
+  UPLOAD_BLOCKED:   '#DC2626',
   FILE_DOWNLOAD:    '#D97706',
   FILE_DELETE:      '#DC2626',
   FILE_SHARE:       '#2563EB',

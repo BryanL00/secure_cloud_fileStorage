@@ -5,6 +5,7 @@ const multer = require('multer');
 const rateLimit = require('express-rate-limit');
 const fileType = require('file-type');
 const { authenticate, authorize } = require('../middleware/auth');
+const { log, ACTIONS } = require('../utils/auditLog');
 const {
   upload, uploadBatch, download, preview, listFiles, listSharedFiles,
   listDeletedFiles, restoreFile, permanentDelete, emptyRecycleBin,
@@ -147,7 +148,16 @@ const validateMagicBytes = async (req, res, next) => {
   if (!req.file) return next();
   try {
     const result = await checkFileType(req.file);
-    if (!result.ok) return res.status(400).json({ message: result.message });
+    if (!result.ok) {
+      // Audit the rejection so disguised-file uploads surface in the admin log.
+      await log(
+        req.user.id, req.user.email, req.user.role,
+        ACTIONS.UPLOAD_BLOCKED, 'files', null,
+        `Upload blocked — ${req.file.originalname}: ${result.message}`,
+        req.ip
+      );
+      return res.status(400).json({ message: result.message });
+    }
     next();
   } catch (err) {
     next(err);
@@ -159,19 +169,26 @@ const validateMagicBytes = async (req, res, next) => {
 const validateMagicBytesBatch = async (req, res, next) => {
   // Start with files dropped by the lenient multer filter (wrong extension/type).
   const invalid = req.filteredOut || [];
-  if (!req.files || req.files.length === 0) {
-    req.invalidFiles = invalid;
-    return next();
-  }
   try {
-    const valid = [];
-    for (const file of req.files) {
-      const result = await checkFileType(file);
-      if (result.ok) valid.push(file);
-      else invalid.push({ name: file.originalname, reason: result.message });
+    if (req.files && req.files.length > 0) {
+      const valid = [];
+      for (const file of req.files) {
+        const result = await checkFileType(file);
+        if (result.ok) valid.push(file);
+        else invalid.push({ name: file.originalname, reason: result.message });
+      }
+      req.files = valid;
     }
-    req.files = valid;
     req.invalidFiles = invalid;
+    // Audit each rejected file so blocked batch uploads surface in the admin log.
+    for (const bad of invalid) {
+      await log(
+        req.user.id, req.user.email, req.user.role,
+        ACTIONS.UPLOAD_BLOCKED, 'files', null,
+        `Upload blocked — ${bad.name}: ${bad.reason}`,
+        req.ip
+      );
+    }
     next();
   } catch (err) {
     next(err);
