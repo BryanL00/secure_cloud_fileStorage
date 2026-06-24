@@ -202,7 +202,13 @@ const MyFiles = () => {
     setShareEmail(''); setSharePermission('viewer');
     const sharesRes = await api.get(`/files/${shareModal.id}/shares`);
     setFileShares(sharesRes.data.shares || []);
-  } catch (err) { setError(err.response?.data?.message || 'Share failed'); }
+  } catch (err) {
+    // No err.response → the request never reached the server (backend down,
+    // TLS/cert not trusted, or network). Make that distinct from a real rejection.
+    setError(err.response
+      ? (err.response.data?.message || err.response.data?.error || 'Share failed')
+      : 'Cannot reach the server. Is the backend running?');
+  }
   finally { setSharing(false); }
 };
 

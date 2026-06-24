@@ -708,6 +708,21 @@ const shareFile = async (req, res) => {
       });
     }
 
+    // Enforce the Guest sensitivity ceiling at share time so the manager is told
+    // immediately, rather than the share silently succeeding and the Guest being
+    // blocked later at download/preview. Mirrors the check in serveFile().
+    if (targetUser.role === 'Guest' && file.sensitivity_level !== 'low') {
+      await log(
+        req.user.id, req.user.email, req.user.role,
+        ACTIONS.ACCESS_DENIED, 'files', id,
+        `Share blocked — cannot share ${file.sensitivity_level} file with Guest ${granted_to_email}`,
+        req.ip
+      );
+      return res.status(403).json({
+        message: 'Access denied: file sensitivity level too high. Guests can only receive low-sensitivity files.'
+      });
+    }
+
     const isDepartmentManager = req.user.role === 'Department Manager';
     const isGuest = targetUser.role === 'Guest';
     const managerDept = req.user.department;
@@ -738,6 +753,7 @@ const shareFile = async (req, res) => {
     res.json({ message: 'File shared successfully' });
 
   } catch (error) {
+    console.error('Share error:', error.message);
     res.status(500).json({ message: 'Share failed', error: error.message });
   }
 };
