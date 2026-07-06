@@ -14,7 +14,7 @@ const authenticate = async (req, res, next) => {
 
     const result = await pool.query(
       `SELECT u.id, u.email, u.full_name, u.is_active, u.department,
-              r.name as role
+              u.managed_project, r.name as role
        FROM users u
        JOIN roles r ON u.role_id = r.id
        WHERE u.id = $1`,

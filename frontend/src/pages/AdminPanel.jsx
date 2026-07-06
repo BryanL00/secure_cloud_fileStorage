@@ -13,7 +13,7 @@ const ALL_ACTIONS = [
 ];
 
 const USERS_COLS = '1.5fr 1.5fr 1.4fr 1fr 1fr 1fr';
-const EMPTY_FORM = { full_name: '', email: '', password: '', role_name: 'User', department: '' };
+const EMPTY_FORM = { full_name: '', email: '', password: '', role_name: 'User', department: '', managed_project: '' };
 
 const ROLE_COLORS = {
   Administrator:        { bg: '#EDE9FE', text: '#7C3AED' },
@@ -158,7 +158,12 @@ const AdminPanel = () => {
     clearMessages();
     setCreateLoading(true);
     try {
-      const payload = { ...createForm, department: createForm.department || undefined };
+      const payload = {
+        ...createForm,
+        department: createForm.department || undefined,
+        managed_project:
+          createForm.role_name === 'Project Manager' ? (createForm.managed_project || undefined) : undefined,
+      };
       await api.post('/auth/register', payload);
       setSuccess(`Account created for ${createForm.email}`);
       setCreateForm(EMPTY_FORM);
@@ -329,6 +334,11 @@ const AdminPanel = () => {
                 <option value="">No department</option>
                 {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
+            )}
+            {createForm.role_name === 'Project Manager' && field('Managed Project',
+              <input className="neu-input" type="text" placeholder="e.g. tax" value={createForm.managed_project}
+                onChange={e => setCreateForm({ ...createForm, managed_project: e.target.value })}
+                required />
             )}
             <div style={{ background: '#F8FAFC', borderRadius: '10px', padding: '12px 14px', fontSize: '12px', color: '#64748B', lineHeight: 1.6 }}>
               {ROLE_HINTS[createForm.role_name]}

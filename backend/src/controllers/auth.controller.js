@@ -26,7 +26,7 @@ function validatePassword(password) {
 
 const register = async (req, res) => {
   try {
-    const { email, password, full_name, role_name, department } = req.body;
+    const { email, password, full_name, role_name, department, managed_project } = req.body;
 
     const pwError = validatePassword(password);
     if (pwError) {
@@ -36,6 +36,13 @@ const register = async (req, res) => {
     if (department && !DEPARTMENTS.includes(department)) {
       return res.status(400).json({ message: 'Invalid department' });
     }
+
+    // The managed project only carries meaning for a Project Manager; ignore it
+    // for every other role so it can't grant accidental cross-project access.
+    const managedProject =
+      role_name === 'Project Manager' && managed_project
+        ? managed_project.trim()
+        : null;
 
     const existing = await pool.query(
       'SELECT id FROM users WHERE email = $1', [email]
@@ -56,10 +63,10 @@ const register = async (req, res) => {
 
     // Database insertion of the hashed credential, not the plaintext
     const result = await pool.query(
-      `INSERT INTO users (email, password_hash, full_name, role_id, department)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, email, full_name, department`,
-      [email, hashedPassword, full_name, roleResult.rows[0].id, department || null]
+      `INSERT INTO users (email, password_hash, full_name, role_id, department, managed_project)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, email, full_name, department, managed_project`,
+      [email, hashedPassword, full_name, roleResult.rows[0].id, department || null, managedProject]
     );
 
     await log(
@@ -89,7 +96,7 @@ const login = async (req, res) => {
 
     const result = await pool.query(
       `SELECT u.id, u.email, u.full_name, u.password_hash,
-              u.is_active, u.department, r.name as role
+              u.is_active, u.department, u.managed_project, r.name as role
        FROM users u
        JOIN roles r ON u.role_id = r.id
        WHERE u.email = $1`,
@@ -136,7 +143,8 @@ const login = async (req, res) => {
         email: user.email,
         full_name: user.full_name,
         role: user.role,
-        department: user.department
+        department: user.department,
+        managed_project: user.managed_project
       }
     });
 
@@ -163,7 +171,7 @@ const getMe = async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT u.id, u.email, u.full_name, u.is_active, u.department,
-              r.name as role
+              u.managed_project, r.name as role
        FROM users u
        JOIN roles r ON u.role_id = r.id
        WHERE u.id = $1`,

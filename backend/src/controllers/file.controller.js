@@ -13,6 +13,23 @@ const QUOTA_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB per user
 
 const VALID_LEVELS = ['low', 'medium', 'high', 'confidential'];
 
+// True if the user has manager-level authority over a file they don't own.
+// A Department Manager governs files owned by members of their department;
+// a Project Manager governs files tagged with the project they manage
+// (matched case-insensitively). The file row must carry `owner_department`
+// and `project_category`.
+const hasManagerAuthority = (user, file) => {
+  if (user.role === 'Department Manager') {
+    return !!user.department && file.owner_department === user.department;
+  }
+  if (user.role === 'Project Manager') {
+    const managed = (user.managed_project || '').trim().toLowerCase();
+    const tag = (file.project_category || '').trim().toLowerCase();
+    return managed !== '' && tag !== '' && managed === tag;
+  }
+  return false;
+};
+
 // Current non-deleted storage used by a user, in bytes.
 const getUsedBytes = async (userId) => {
   const r = await pool.query(
@@ -269,8 +286,12 @@ const serveFile = async (req, res, { isPreview }) => {
     }
 
     const isOwner = file.owner_id === req.user.id;
+    // A manager has full read access to files within their scope (a Department
+    // Manager's department, or a Project Manager's project) without needing an
+    // explicit share grant.
+    const isManager = hasManagerAuthority(req.user, file);
 
-    if (!isOwner) {
+    if (!isOwner && !isManager) {
       const permResult = await pool.query(
         `SELECT permission_level FROM file_permissions
          WHERE file_id = $1 AND granted_to_user_id = $2`,
@@ -377,17 +398,57 @@ const listFiles = async (req, res) => {
       });
     }
 
-    const result = await pool.query(
-      `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
-              f.sensitivity_level, f.project_category, f.department,
-              f.folder_id, f.uploaded_at, u.email as owner_email
-       FROM files f
-       JOIN users u ON f.owner_id = u.id
-       WHERE f.is_deleted = FALSE
-         AND f.owner_id = $1
-       ORDER BY f.uploaded_at DESC`,
-      [req.user.id]
-    );
+    let result;
+    if (req.user.role === 'Department Manager') {
+      // A Department Manager sees their own files plus every file owned by a
+      // member of their department. Mirrors the department-wide folder listing.
+      result = await pool.query(
+        `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
+                f.sensitivity_level, f.project_category, f.department,
+                f.folder_id, f.uploaded_at, u.email as owner_email
+         FROM files f
+         JOIN users u ON f.owner_id = u.id
+         WHERE f.is_deleted = FALSE
+           AND (
+             f.owner_id = $1
+             OR (u.department = $2 AND $2 IS NOT NULL)
+           )
+         ORDER BY f.uploaded_at DESC`,
+        [req.user.id, req.user.department]
+      );
+    } else if (req.user.role === 'Project Manager') {
+      // A Project Manager sees their own files plus every file tagged with the
+      // project they manage, regardless of department (case-insensitive match).
+      result = await pool.query(
+        `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
+                f.sensitivity_level, f.project_category, f.department,
+                f.folder_id, f.uploaded_at, u.email as owner_email
+         FROM files f
+         JOIN users u ON f.owner_id = u.id
+         WHERE f.is_deleted = FALSE
+           AND (
+             f.owner_id = $1
+             OR (
+               $2 <> ''
+               AND LOWER(TRIM(COALESCE(f.project_category, ''))) = LOWER(TRIM($2))
+             )
+           )
+         ORDER BY f.uploaded_at DESC`,
+        [req.user.id, req.user.managed_project || '']
+      );
+    } else {
+      result = await pool.query(
+        `SELECT f.id, f.original_name, f.size_bytes, f.mime_type,
+                f.sensitivity_level, f.project_category, f.department,
+                f.folder_id, f.uploaded_at, u.email as owner_email
+         FROM files f
+         JOIN users u ON f.owner_id = u.id
+         WHERE f.is_deleted = FALSE
+           AND f.owner_id = $1
+         ORDER BY f.uploaded_at DESC`,
+        [req.user.id]
+      );
+    }
 
     res.json({ files: result.rows });
 
@@ -628,7 +689,10 @@ const deleteFileRecord = async (req, res) => {
     }
 
     const fileResult = await pool.query(
-      'SELECT * FROM files WHERE id = $1 AND is_deleted = FALSE', [id]
+      `SELECT f.*, u.department AS owner_department
+       FROM files f JOIN users u ON f.owner_id = u.id
+       WHERE f.id = $1 AND f.is_deleted = FALSE`,
+      [id]
     );
 
     if (fileResult.rows.length === 0) {
@@ -637,7 +701,12 @@ const deleteFileRecord = async (req, res) => {
 
     const file = fileResult.rows[0];
 
-    if (file.owner_id !== req.user.id) {
+    const isOwner = file.owner_id === req.user.id;
+    // A manager may delete files within their scope (department for a Department
+    // Manager, project for a Project Manager).
+    const isManager = hasManagerAuthority(req.user, file);
+
+    if (!isOwner && !isManager) {
       return res.status(403).json({ message: 'Access denied' });
     }
 
@@ -674,7 +743,10 @@ const shareFile = async (req, res) => {
     }
 
     const fileResult = await pool.query(
-      'SELECT * FROM files WHERE id = $1 AND is_deleted = FALSE', [id]
+      `SELECT f.*, u.department AS owner_department
+       FROM files f JOIN users u ON f.owner_id = u.id
+       WHERE f.id = $1 AND f.is_deleted = FALSE`,
+      [id]
     );
 
     if (fileResult.rows.length === 0) {
@@ -683,7 +755,12 @@ const shareFile = async (req, res) => {
 
     const file = fileResult.rows[0];
 
-    if (file.owner_id !== req.user.id) {
+    const ownsFile = file.owner_id === req.user.id;
+    // A manager may share files within their scope (department for a Department
+    // Manager, project for a Project Manager).
+    const managesFile = hasManagerAuthority(req.user, file);
+
+    if (!ownsFile && !managesFile) {
       return res.status(403).json({ message: 'You can only share files you own' });
     }
 
@@ -796,9 +873,18 @@ const getStorageStats = async (req, res) => {
 const getFileShares = async (req, res) => {
   try {
     const { id } = req.params;
-    const fileResult = await pool.query('SELECT owner_id FROM files WHERE id = $1 AND is_deleted = FALSE', [id]);
+    const fileResult = await pool.query(
+      `SELECT f.owner_id, f.project_category, u.department AS owner_department
+       FROM files f JOIN users u ON f.owner_id = u.id
+       WHERE f.id = $1 AND f.is_deleted = FALSE`,
+      [id]
+    );
     if (fileResult.rows.length === 0) return res.status(404).json({ message: 'File not found' });
-    if (fileResult.rows[0].owner_id !== req.user.id) return res.status(403).json({ message: 'Access denied' });
+
+    const { owner_id } = fileResult.rows[0];
+    const isOwner = owner_id === req.user.id;
+    const isManager = hasManagerAuthority(req.user, fileResult.rows[0]);
+    if (!isOwner && !isManager) return res.status(403).json({ message: 'Access denied' });
 
     const [sharesResult, ownerResult] = await Promise.all([
       pool.query(
@@ -806,7 +892,7 @@ const getFileShares = async (req, res) => {
          FROM file_permissions fp JOIN users u ON u.id = fp.granted_to_user_id
          WHERE fp.file_id = $1 ORDER BY fp.created_at DESC`, [id]
       ),
-      pool.query('SELECT id, email, full_name FROM users WHERE id = $1', [req.user.id]),
+      pool.query('SELECT id, email, full_name FROM users WHERE id = $1', [owner_id]),
     ]);
 
     res.json({ owner: ownerResult.rows[0], shares: sharesResult.rows });
@@ -820,10 +906,16 @@ const revokeShare = async (req, res) => {
     const { id, userId } = req.params;
 
     const fileResult = await pool.query(
-      'SELECT owner_id, original_name FROM files WHERE id = $1 AND is_deleted = FALSE', [id]
+      `SELECT f.owner_id, f.original_name, f.project_category, u.department AS owner_department
+       FROM files f JOIN users u ON f.owner_id = u.id
+       WHERE f.id = $1 AND f.is_deleted = FALSE`,
+      [id]
     );
     if (fileResult.rows.length === 0) return res.status(404).json({ message: 'File not found' });
-    if (fileResult.rows[0].owner_id !== req.user.id) return res.status(403).json({ message: 'Only the file owner can revoke access' });
+
+    const isOwner = fileResult.rows[0].owner_id === req.user.id;
+    const isManager = hasManagerAuthority(req.user, fileResult.rows[0]);
+    if (!isOwner && !isManager) return res.status(403).json({ message: 'Only the file owner or a managing manager can revoke access' });
 
     const targetResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
     if (targetResult.rows.length === 0) return res.status(404).json({ message: 'User not found' });

@@ -559,7 +559,18 @@ const MyFiles = () => {
                   {visibleFiles.map((file, idx) => {
                     const isSelected    = selectedFiles.includes(file.id);
                     const isOwner       = file.owner_email === user?.email;
-                    const canDeleteThis = canDelete && isOwner;
+                    // A Department Manager has authority over every file owned by a
+                    // member of their department; a Project Manager over every file
+                    // tagged with the project they manage. The API only lists files
+                    // within scope, but we mirror the backend rule here precisely.
+                    const isDeptManager  = user?.role === 'Department Manager';
+                    const inManagedProj  =
+                      user?.role === 'Project Manager' &&
+                      user?.managed_project &&
+                      file.project_category &&
+                      file.project_category.trim().toLowerCase() === user.managed_project.trim().toLowerCase();
+                    const canActOnThis  = isOwner || isDeptManager || inManagedProj;
+                    const canDeleteThis = canDelete && canActOnThis;
                     return (
                       <div key={file.id} style={{ display: 'grid', gridTemplateColumns: canDelete ? '36px 2fr 1fr 1fr 1fr 1fr 1.8fr' : '2fr 1fr 1fr 1fr 1fr 1.8fr', gap: '8px', padding: '14px 20px', alignItems: 'center', borderBottom: idx < visibleFiles.length - 1 ? '1px solid #F8FAFC' : 'none', background: isSelected ? '#F0FDF4' : 'transparent', transition: 'background 0.15s' }}>
                         {canDelete && (
@@ -578,9 +589,16 @@ const MyFiles = () => {
                         <div style={{ fontSize: '12px', color: '#64748B' }}>{file.project_category || '—'}</div>
                         <div style={{ fontSize: '12px', color: '#64748B' }}>{formatSize(file.size_bytes)}</div>
                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap' }}>
-                          <button className="neu-btn" style={{ padding: '5px 8px', fontSize: '11px', whiteSpace: 'nowrap' }} onClick={() => handlePreview(file)}>Preview</button>
-                          <button className="neu-btn" style={{ padding: '5px 8px', fontSize: '11px', whiteSpace: 'nowrap' }} onClick={() => handleDownload(file.id, file.original_name)}>Download</button>
-                          {canShare && isOwner && (
+                          {canActOnThis && (
+                            <button className="neu-btn" style={{ padding: '5px 8px', fontSize: '11px', whiteSpace: 'nowrap' }} onClick={() => handlePreview(file)}>Preview</button>
+                          )}
+                          {canActOnThis && (
+                            <button className="neu-btn" style={{ padding: '5px 8px', fontSize: '11px', whiteSpace: 'nowrap' }} onClick={() => handleDownload(file.id, file.original_name)}>Download</button>
+                          )}
+                          {!canActOnThis && (
+                            <span style={{ fontSize: '11px', color: '#94A3B8' }}>View only</span>
+                          )}
+                          {canShare && canActOnThis && (
                             <button className="neu-btn" style={{ padding: '5px 8px', fontSize: '11px', whiteSpace: 'nowrap', color: '#2563EB' }} onClick={() => { setShareModal(file); setShareEmail(''); }}>Share</button>
                           )}
                           {canDeleteThis && (
